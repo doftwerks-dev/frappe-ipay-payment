@@ -1,0 +1,128 @@
+{
+ "charts": [],
+ "content": "[{\"id\":\"iPayShortcutsHead\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Shortcuts</b></span>\",\"col\":12}},{\"id\":\"iPayShortSettings\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"iPay Settings\",\"col\":3}},{\"id\":\"iPayShortPI\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Purchase Invoice\",\"col\":3}},{\"id\":\"iPayShortPE\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Payment Entry\",\"col\":3}},{\"id\":\"iPayShortBA\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Bank Account\",\"col\":3}},{\"id\":\"iPaySpacer\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"iPayMastersHead\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Reports &amp; Masters</b></span>\",\"col\":12}},{\"id\":\"iPayCardMain\",\"type\":\"card\",\"data\":{\"card_name\":\"iPay\",\"col\":4}}]",
+ "creation": "2026-08-24 12:00:00.000000",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "for_user": "",
+ "hide_custom": 0,
+ "icon": "arrow-left",
+ "idx": 0,
+ "indicator_color": "",
+ "is_hidden": 0,
+ "label": "iPay",
+ "links": [
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "iPay",
+   "link_count": 6,
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "iPay Settings",
+   "link_count": 0,
+   "link_to": "iPay Settings",
+   "link_type": "DocType",
+   "onboard": 1,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "iPay Transaction",
+   "link_count": 0,
+   "link_to": "iPay Transaction",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Purchase Invoice",
+   "link_count": 0,
+   "link_to": "Purchase Invoice",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Payment Entry",
+   "link_count": 0,
+   "link_to": "Payment Entry",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Bank Account",
+   "link_count": 0,
+   "link_to": "Bank Account",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Mode of Payment",
+   "link_count": 0,
+   "link_to": "Mode of Payment",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  }
+ ],
+ "modified": "2026-08-24 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "iPay Integration",
+ "name": "iPay",
+ "number_cards": [],
+ "owner": "Administrator",
+ "parent_page": "Accounting",
+ "public": 1,
+ "quick_lists": [],
+ "roles": [],
+ "sequence_id": 99.0,
+ "shortcuts": [
+  {
+   "color": "Grey",
+   "doc_view": "",
+   "label": "iPay Settings",
+   "link_to": "iPay Settings",
+   "type": "DocType"
+  },
+  {
+   "color": "Blue",
+   "doc_view": "",
+   "label": "Purchase Invoice",
+   "link_to": "Purchase Invoice",
+   "stats_filter": "{\"status\":\"Unpaid\"}",
+   "type": "DocType"
+  },
+  {
+   "color": "Green",
+   "doc_view": "",
+   "label": "Payment Entry",
+   "link_to": "Payment Entry",
+   "type": "DocType"
+  },
+  {
+   "doc_view": "",
+   "label": "Bank Account",
+   "link_to": "Bank Account",
+   "type": "DocType"
+  }
+ ],
+ "title": "iPay"
+}

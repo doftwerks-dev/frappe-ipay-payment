@@ -1,0 +1,61 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-08-24 09:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "company",
+  "client_id",
+  "client_secret",
+  "payment_account"
+ ],
+ "fields": [
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "fieldname": "client_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Client ID",
+   "reqd": 1
+  },
+  {
+   "fieldname": "client_secret",
+   "fieldtype": "Password",
+   "label": "Client Secret",
+   "reqd": 1
+  },
+  {
+   "description": "Leave blank — filled automatically when you save (an \"iPay\" bank account is created in your Chart of Accounts). Change it only if you already track the iPay wallet under a different account.",
+   "fieldname": "payment_account",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Payment Account",
+   "options": "Account",
+   "placeholder": "Auto-created on Save",
+   "read_only_depends_on": "eval:!doc.payment_account"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-24 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "iPay Integration",
+ "name": "iPay Account",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

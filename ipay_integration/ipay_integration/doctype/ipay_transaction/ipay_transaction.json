@@ -1,0 +1,240 @@
+{
+ "actions": [],
+ "autoname": "format:IPAY-TXN-{YYYY}-{#####}",
+ "creation": "2026-09-07 09:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "purchase_invoice",
+  "supplier",
+  "company",
+  "status",
+  "column_break_amounts",
+  "amount",
+  "currency",
+  "attempts",
+  "transfer_section",
+  "idempotency_key",
+  "ipay_reference",
+  "payment_entry",
+  "column_break_transfer",
+  "settled_at",
+  "last_checked_at",
+  "destination_section",
+  "bank_code",
+  "bank_account_no",
+  "column_break_destination",
+  "payment_account",
+  "snapshot_section",
+  "error",
+  "request_payload",
+  "response_payload"
+ ],
+ "fields": [
+  {
+   "fieldname": "purchase_invoice",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Purchase Invoice",
+   "options": "Purchase Invoice",
+   "read_only": 1,
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "supplier",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Supplier",
+   "options": "Supplier",
+   "read_only": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company",
+   "read_only": 1
+  },
+  {
+   "default": "Initiated",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Initiated\nProcessing\nSuccessful\nFailed\nReversed",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_amounts",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "label": "Amount",
+   "options": "currency",
+   "read_only": 1
+  },
+  {
+   "default": "NGN",
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "label": "Currency",
+   "options": "Currency",
+   "read_only": 1
+  },
+  {
+   "default": "1",
+   "description": "How many times initiate was attempted. Every attempt reuses the same idempotency key, so retries can never double-pay.",
+   "fieldname": "attempts",
+   "fieldtype": "Int",
+   "label": "Attempts",
+   "read_only": 1
+  },
+  {
+   "fieldname": "transfer_section",
+   "fieldtype": "Section Break",
+   "label": "Transfer"
+  },
+  {
+   "description": "The x-idempotency-key sent to iPay - one UUID per payment intent, reused on every retry. Also the lookup key for check-status.",
+   "fieldname": "idempotency_key",
+   "fieldtype": "Data",
+   "label": "Idempotency Key",
+   "read_only": 1,
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "ipay_reference",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "iPay Reference",
+   "read_only": 1
+  },
+  {
+   "fieldname": "payment_entry",
+   "fieldtype": "Link",
+   "label": "Payment Entry",
+   "options": "Payment Entry",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_transfer",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "settled_at",
+   "fieldtype": "Datetime",
+   "label": "Settled At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_checked_at",
+   "fieldtype": "Datetime",
+   "label": "Last Status Check",
+   "read_only": 1
+  },
+  {
+   "fieldname": "destination_section",
+   "fieldtype": "Section Break",
+   "label": "Destination"
+  },
+  {
+   "fieldname": "bank_code",
+   "fieldtype": "Data",
+   "label": "NIP Bank Code",
+   "read_only": 1
+  },
+  {
+   "fieldname": "bank_account_no",
+   "fieldtype": "Data",
+   "label": "Bank Account No",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_destination",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "The company's iPay ledger account: sent to iPay as vendorPaymentBankId and used as Paid From on the Payment Entry.",
+   "fieldname": "payment_account",
+   "fieldtype": "Link",
+   "label": "Payment Account",
+   "options": "Account",
+   "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "snapshot_section",
+   "fieldtype": "Section Break",
+   "label": "Diagnostics"
+  },
+  {
+   "fieldname": "error",
+   "fieldtype": "Small Text",
+   "label": "Error",
+   "read_only": 1
+  },
+  {
+   "fieldname": "request_payload",
+   "fieldtype": "Code",
+   "label": "Request Payload",
+   "options": "JSON",
+   "read_only": 1
+  },
+  {
+   "fieldname": "response_payload",
+   "fieldtype": "Code",
+   "label": "Last Response",
+   "options": "JSON",
+   "read_only": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "in_create": 1,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-09-07 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "iPay Integration",
+ "name": "iPay Transaction",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1
+  },
+  {
+   "read": 1,
+   "report": 1,
+   "role": "Accounts User"
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

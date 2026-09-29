@@ -1,0 +1,65 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-08-24 09:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "setup_help",
+  "enabled",
+  "base_url",
+  "accounts"
+ ],
+ "fields": [
+  {
+   "fieldname": "setup_help",
+   "fieldtype": "HTML",
+   "options": "<div class=\"alert alert-info\" style=\"margin-bottom: 0;\"><strong>Connect your iPay account.</strong> This app pays vendor bills straight from your iPay wallet, without leaving ERPNext. Each Company needs its own API credentials:<br>1. Log in to your <strong>iPay dashboard</strong> &mdash; new to iPay? Contact iPay there to get an account.<br>2. Generate your <strong>Client ID</strong> and <strong>Client Secret</strong> under API settings.<br>3. Add a row per Company below, paste them in, then <em>Save</em> and use <em>Test Connection</em>.<br>Leave <strong>Payment Account</strong> empty &mdash; it fills itself on Save (an &quot;iPay&quot; bank account is created in your Chart of Accounts for you).<br>Sandbox vs production is determined by the credentials and Base URL &mdash; there is no environment switch.<br>Questions? Contact <a href=\"mailto:support@doftwerks.com\">support@doftwerks.com</a> or visit <a href=\"https://doftwerks.com\" target=\"_blank\">doftwerks.com</a>.</div>"
+  },
+  {
+   "default": "0",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "default": "https://payroll.ipaysuite.app",
+   "fieldname": "base_url",
+   "fieldtype": "Data",
+   "label": "Base URL"
+  },
+  {
+   "fieldname": "accounts",
+   "fieldtype": "Table",
+   "label": "iPay Accounts",
+   "options": "iPay Account",
+   "reqd": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-08-24 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "iPay Integration",
+ "name": "iPay Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

@@ -5,10 +5,27 @@ app_description = "Pay vendor bills and collect payments through iPay, from insi
 app_email = "support@doftwerks.com"
 app_license = "mit"
 
+# Fixtures
+# --------
+# Custom Fields added by this app on core/ERPNext doctypes. Only fields on the
+# doctypes we extend and with the ipay_ prefix are exported.
+# fixtures/bank.json (the Nigerian NIP bank list) is handwritten and synced on
+# migrate; Bank is deliberately NOT exported here so a `bench export-fixtures`
+# on a live site can never overwrite the curated list.
+fixtures = [
+	{
+		"dt": "Custom Field",
+		"filters": [
+			["dt", "in", ["Purchase Invoice", "Bank"]],
+			["fieldname", "like", "ipay_%"],
+		],
+	},
+]
+
 # Apps
 # ------------------
 
-# required_apps = []
+required_apps = ["erpnext"]
 
 # Each item in the list will be shown as an app in the apps page
 # add_to_apps_screen = [
@@ -43,8 +60,8 @@ app_license = "mit"
 # page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
-# doctype_js = {"doctype" : "public/js/doctype.js"}
-# doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
+doctype_js = {"Purchase Invoice": "public/js/purchase_invoice.js"}
+doctype_list_js = {"Purchase Invoice": "public/js/purchase_invoice_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
 
@@ -148,28 +165,22 @@ app_license = "mit"
 # Scheduled Tasks
 # ---------------
 
-# scheduler_events = {
-# 	"all": [
-# 		"ipay_integration.tasks.all"
-# 	],
-# 	"daily": [
-# 		"ipay_integration.tasks.daily"
-# 	],
-# 	"hourly": [
-# 		"ipay_integration.tasks.hourly"
-# 	],
-# 	"weekly": [
-# 		"ipay_integration.tasks.weekly"
-# 	],
-# 	"monthly": [
-# 		"ipay_integration.tasks.monthly"
-# 	],
-# }
+scheduler_events = {
+	"cron": {
+		# safety net for transfers stuck in Initiated/Processing: the enqueued
+		# poll normally settles them, this catches missed jobs/worker restarts
+		"*/10 * * * *": [
+			"ipay_integration.ipay.poll_pending_transfers",
+		],
+	},
+}
 
 # Testing
 # -------
 
-# before_tests = "ipay_integration.install.before_tests"
+# bootstrap a bare CI site (test company, item groups, UOMs) before tests;
+# guarded internally, so it is a no-op on an already-set-up site
+before_tests = "ipay_integration.tests.utils.before_tests"
 
 # Overriding Methods
 # ------------------------------
