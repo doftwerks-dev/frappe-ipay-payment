@@ -354,6 +354,10 @@ class TestFriendlyErrors(FrappeTestCase):
 	def test_credential_needles(self):
 		self.assertEqual(ipay._friendly_error("invalid_client"), ipay.INVALID_CREDENTIALS_MESSAGE)
 		self.assertEqual(ipay._friendly_error("Unauthenticated."), ipay.INVALID_CREDENTIALS_MESSAGE)
+		# the sandbox's actual OAuth rejection wording (seen in the e2e smoke test)
+		self.assertEqual(
+			ipay._friendly_error("Client authentication failed"), ipay.INVALID_CREDENTIALS_MESSAGE
+		)
 
 	def test_scope_outranks_credentials(self):
 		# "invalid_scope" must match before the generic credential needles

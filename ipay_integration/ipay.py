@@ -111,6 +111,7 @@ FRIENDLY_ERRORS = [
 		"provisioned for transfers - contact iPay support.",
 	),
 	("invalid_client", INVALID_CREDENTIALS_MESSAGE),
+	("authentication failed", INVALID_CREDENTIALS_MESSAGE),
 	("unauthenticated", INVALID_CREDENTIALS_MESSAGE),
 	("unauthorized", INVALID_CREDENTIALS_MESSAGE),
 	("access denied", INVALID_CREDENTIALS_MESSAGE),
