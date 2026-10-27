@@ -1,5 +1,14 @@
 ### iPay Integration
 
+> [!IMPORTANT]
+> **`develop` is the main branch of this repository.** GitHub opens on `main` by default,
+> but the latest code lives on [`develop`](https://github.com/doftwerks-dev/frappe-ipay-payment/tree/develop).
+> Branch from `develop` and open pull requests against `develop`.
+>
+> - `develop` - active development (Frappe/ERPNext v15)
+> - `main` - stable v15 releases, merged from `develop`
+> - `version-16` - Frappe/ERPNext v16 releases
+
 Pay vendor bills and collect payments through iPay, from inside ERPNext
 
 ### Installation
