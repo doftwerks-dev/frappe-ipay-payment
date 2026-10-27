@@ -9,7 +9,16 @@
   "company",
   "client_id",
   "client_secret",
-  "payment_account"
+  "key_id",
+  "request_enc_key",
+  "request_sign_key",
+  "callback_enc_key",
+  "callback_sign_key",
+  "payment_account",
+  "rotation_section",
+  "prev_key_id",
+  "prev_callback_enc_key",
+  "prev_callback_sign_key"
  ],
  "fields": [
   {
@@ -24,14 +33,51 @@
    "fieldname": "client_id",
    "fieldtype": "Data",
    "in_list_view": 1,
-   "label": "Client ID",
-   "reqd": 1
+   "label": "API Client ID",
+   "reqd": 1,
+   "description": "The id of the API client iPay registered for this company as an ERP plugin. Not a secret."
   },
   {
    "fieldname": "client_secret",
    "fieldtype": "Password",
-   "label": "Client Secret",
-   "reqd": 1
+   "label": "OAuth Client Secret",
+   "reqd": 1,
+   "description": "Encrypted by Frappe. Never shown again, never in a backup in the clear."
+  },
+  {
+   "fieldname": "key_id",
+   "fieldtype": "Data",
+   "label": "Key ID",
+   "reqd": 1,
+   "description": "IPAY_KEY_ID from iPay."
+  },
+  {
+   "fieldname": "request_enc_key",
+   "fieldtype": "Password",
+   "label": "Request Encryption Key",
+   "reqd": 1,
+   "description": "IPAY_REQUEST_ENC_KEY (base64, 32 bytes)."
+  },
+  {
+   "fieldname": "request_sign_key",
+   "fieldtype": "Password",
+   "label": "Request Signing Key",
+   "reqd": 1,
+   "description": "IPAY_REQUEST_SIGN_KEY"
+  },
+  {
+   "fieldname": "callback_enc_key",
+   "fieldtype": "Password",
+   "label": "Callback Encryption Key",
+   "reqd": 1,
+   "description": "IPAY_CALLBACK_ENC_KEY"
+  },
+  {
+   "fieldname": "callback_sign_key",
+   "fieldtype": "Password",
+   "label": "Callback Signing Key",
+   "reqd": 1,
+   "description": "IPAY_CALLBACK_SIGN_KEY"
   },
   {
    "description": "Leave blank — filled automatically when you save (an \"iPay\" bank account is created in your Chart of Accounts). Change it only if you already track the iPay wallet under a different account.",
@@ -42,6 +88,28 @@
    "options": "Account",
    "placeholder": "Auto-created on Save",
    "read_only_depends_on": "eval:!doc.payment_account"
+  },
+  {
+   "fieldname": "rotation_section",
+   "fieldtype": "Section Break",
+   "label": "During a key rotation",
+   "collapsible": 1,
+   "description": "The previous callback keys iPay may still answer under until the rotation window ends. Clear them afterwards."
+  },
+  {
+   "fieldname": "prev_key_id",
+   "fieldtype": "Data",
+   "label": "Previous Key ID"
+  },
+  {
+   "fieldname": "prev_callback_enc_key",
+   "fieldtype": "Password",
+   "label": "Previous Callback Encryption Key"
+  },
+  {
+   "fieldname": "prev_callback_sign_key",
+   "fieldtype": "Password",
+   "label": "Previous Callback Signing Key"
   }
  ],
  "grid_page_length": 50,

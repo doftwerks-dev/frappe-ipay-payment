@@ -1,6 +1,9 @@
-// "Pay via iPay" on submitted, unpaid Purchase Invoices.
-// All secrets and API calls live on the server; this script only drives the
-// dialog and calls whitelisted methods.
+// "Pay with iPay" on submitted, unpaid Purchase Invoices.
+// It asks iPay to pay the invoice and opens iPay's confirmation page, where the payer enters their iPay password, the company
+// finance PIN and an emailed code. Nothing secret is here: no keys, no PIN, no transfer call. iPay tells ERPNext (signed) when the
+// payment moves, and the Payment Entry is recorded then.
+
+const IPAY_OPEN = ["Awaiting Confirmation", "In Approval", "Processing", "Transferred"];
 
 frappe.ui.form.on("Purchase Invoice", {
 	refresh(frm) {
@@ -8,31 +11,17 @@ frappe.ui.form.on("Purchase Invoice", {
 		if (doc.docstatus !== 1 || flt(doc.outstanding_amount) <= 0) {
 			return;
 		}
+		if (!frappe.user.has_role("iPay Payer")) {
+			return;
+		}
 
-		// a transfer is in flight - never offer a second initiate
-		if (doc.ipay_status === "Processing" || doc.ipay_status === "Initiated") {
+		// a request is already open: never offer a second one, only a look at where it stands
+		if (IPAY_OPEN.includes(doc.ipay_status)) {
 			frm.add_custom_button(__("Check iPay Status"), () => ipay_check_status(frm));
 			return;
 		}
 
-		// transfer settled but the Payment Entry is missing (ordering guard):
-		// this button only re-records the ledger entry, never the transfer
-		if (doc.ipay_status === "Paid") {
-			frm.add_custom_button(__("Record iPay Payment"), () => {
-				frappe.confirm(
-					__(
-						"The iPay transfer already succeeded (reference {0}) but no Payment Entry was recorded. Record it now? The transfer will NOT run again.",
-						[frappe.utils.escape_html(doc.ipay_reference || "-")]
-					),
-					() => ipay_call_pay(frm)
-				);
-			});
-			return;
-		}
-
-		const retrying = doc.ipay_status === "Failed" || doc.ipay_status === "Reversed";
-		const label = retrying ? __("Retry iPay Payment") : __("Pay via iPay");
-		frm.add_custom_button(label, () => ipay_open_dialog(frm));
+		frm.add_custom_button(__("Pay with iPay"), () => ipay_open_dialog(frm));
 	},
 });
 
@@ -57,7 +46,7 @@ function ipay_open_dialog(frm) {
 				frappe.msgprint({
 					title: __("iPay Payment"),
 					message: __(
-						"Company {0} is not set up for iPay yet. Add its credentials in iPay Settings and Save.",
+						"Company {0} is not set up for iPay yet. Add its client id, secret and keys in iPay Settings and Save.",
 						[frappe.utils.escape_html(doc.company)]
 					),
 					indicator: "orange",
@@ -73,24 +62,8 @@ function ipay_show_dialog(frm, ctx) {
 	const esc = frappe.utils.escape_html;
 	const amount = format_currency(ctx.outstanding, ctx.currency);
 
-	let wallet_html;
-	if (ctx.wallet && !ctx.wallet.error) {
-		const low = flt(ctx.wallet.balance) < flt(ctx.outstanding);
-		wallet_html = `<span class="indicator-pill ${low ? "orange" : "green"}">
-			${__("Wallet balance")}: ${esc(ctx.wallet.formatted)}</span>` +
-			(low
-				? `<div class="text-muted small">${__(
-						"Balance is indicative and ignores in-flight transfers - iPay makes the final call."
-				  )}</div>`
-				: "");
-	} else {
-		wallet_html = `<span class="text-muted">${__("Wallet balance unavailable")}${
-			ctx.wallet && ctx.wallet.error ? ": " + esc(ctx.wallet.error) : ""
-		}</span>`;
-	}
-
 	const d = new frappe.ui.Dialog({
-		title: __("Pay via iPay"),
+		title: __("Pay with iPay"),
 		fields: [
 			{ fieldtype: "HTML", fieldname: "summary" },
 			{ fieldtype: "Section Break", label: __("Supplier's Bank Account") },
@@ -113,7 +86,7 @@ function ipay_show_dialog(frm, ctx) {
 				),
 			},
 		],
-		primary_action_label: __("Pay {0}", [amount]),
+		primary_action_label: __("Continue in iPay"),
 		primary_action(values) {
 			if (!/^\d{10}$/.test(cstr(values.account_number).trim())) {
 				frappe.msgprint(__("NUBAN account numbers are exactly 10 digits."));
@@ -128,7 +101,9 @@ function ipay_show_dialog(frm, ctx) {
 		<div style="margin-bottom: var(--margin-md);">
 			<div><strong>${esc(ctx.supplier_name)}</strong> &mdash; ${__("bill")} ${esc(frm.doc.name)}</div>
 			<div class="h4" style="margin: var(--margin-xs) 0;">${esc(amount)}</div>
-			<div>${wallet_html}</div>
+			<div class="text-muted small">${__(
+				"You will enter your iPay password, the finance PIN and an emailed code on iPay's page. Nothing is paid until you do."
+			)}</div>
 		</div>`);
 	d.show();
 }
@@ -143,49 +118,40 @@ function ipay_save_bank_and_pay(frm, values) {
 		},
 		freeze: true,
 		freeze_message: __("Saving bank details..."),
-		callback: () => ipay_call_pay(frm),
+		callback: () => ipay_request_payment(frm),
 	});
 }
 
-function ipay_call_pay(frm) {
+function ipay_request_payment(frm) {
+	// Open the tab straight away, from the click, so the browser allows it; it is pointed at iPay when the answer arrives. It must not
+	// be opened with noopener: iPay's page reports back through window.opener.
+	const tab = window.open("", "_blank");
 	frappe.call({
 		method: "ipay_integration.ipay.pay_invoice",
 		args: { name: frm.doc.name },
 		freeze: true,
-		freeze_message: __("Sending transfer to iPay..."),
+		freeze_message: __("Asking iPay..."),
+		error: () => {
+			if (tab) tab.close();
+		},
 		callback: (r) => {
 			const res = r.message || {};
 			frm.reload_doc();
-			if (res.processing) {
+			if (res.route === "approval") {
+				if (tab) tab.close();
 				frappe.msgprint({
-					title: __("iPay Payment"),
-					message: frappe.utils.escape_html(
-						res.message ||
-							__("iPay accepted the transfer. It will be recorded automatically once it settles.")
-					),
+					title: __("Sent for approval"),
+					message: __("iPay sent this payment to your approvers. It is paid when the last one approves."),
 					indicator: "blue",
 				});
-			} else if (res.ok && res.warning) {
-				frappe.msgprint({
-					title: __("iPay Payment"),
-					message: frappe.utils.escape_html(res.warning),
-					indicator: "orange",
-				});
-			} else if (res.ok) {
-				frappe.show_alert({
-					message: __("Paid via iPay. Reference: {0}", [
-						frappe.utils.escape_html(res.reference || "-"),
-					]),
-					indicator: "green",
-				});
+				return;
+			}
+			if (res.confirm_url && tab) {
+				// The link is a secret for 30 minutes: it goes to the payer's browser only, never to storage or a log.
+				tab.location.href = res.confirm_url;
 			} else {
-				frappe.msgprint({
-					title: __("iPay Payment"),
-					message: (res.errors || [__("Payment failed - check iPay Settings.")])
-						.map((e) => frappe.utils.escape_html(e))
-						.join("<br>"),
-					indicator: "red",
-				});
+				if (tab) tab.close();
+				frappe.msgprint({ title: __("iPay Payment"), message: __("iPay did not give a confirmation link. Try again."), indicator: "red" });
 			}
 		},
 	});
@@ -193,32 +159,10 @@ function ipay_call_pay(frm) {
 
 function ipay_check_status(frm) {
 	frappe.call({
-		method: "ipay_integration.ipay.refresh_transfer_status",
+		method: "ipay_integration.ipay.refresh_payment_status",
 		args: { name: frm.doc.name },
 		freeze: true,
-		freeze_message: __("Checking transfer status with iPay..."),
-		callback: (r) => {
-			const res = r.message || {};
-			frm.reload_doc();
-			if (res.status === "Successful") {
-				frappe.show_alert({
-					message: __("Transfer settled. Reference: {0}", [
-						frappe.utils.escape_html(res.reference || "-"),
-					]),
-					indicator: "green",
-				});
-			} else if (res.status === "Processing" || res.status === "Initiated") {
-				frappe.show_alert({
-					message: __("Still settling on iPay's side - it will be recorded automatically."),
-					indicator: "blue",
-				});
-			} else if (res.error) {
-				frappe.msgprint({
-					title: __("iPay Status"),
-					message: frappe.utils.escape_html(res.error),
-					indicator: "red",
-				});
-			}
-		},
+		freeze_message: __("Checking with iPay..."),
+		callback: () => frm.reload_doc(),
 	});
 }
