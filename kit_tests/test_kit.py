@@ -297,3 +297,46 @@ def test_events_are_acknowledged_and_other_paths_are_not_found():
     assert status == 200 and got[0]["event_id"] == "p1:recorded"
     assert receiver().handle("GET", "/elsewhere/bills/B-1", {}, "")[0] == 404
     assert receiver().handle("DELETE", "/ipay/payments", {}, "")[0] == 404
+
+
+# ---- hardening from review: odd input is a refusal, never a server error ------------------------------------------------
+
+@pytest.mark.parametrize("override", [
+    {"x-ipay-signature": "caf\u00e9"},
+    {"x-timestamp": "\u00b2"},
+    {"x-timestamp": "9" * 40},
+    {"x-ipay-nonce": V["nonce"] + "\n"},
+    {"x-client-id": "\u00e9"},
+])
+def test_odd_headers_raise_an_envelope_error_not_a_server_error(override):
+    with pytest.raises(EnvelopeError):
+        envelope.open_({REQUEST.kid: REQUEST}, CLIENT, "POST", V["post"]["target"], _php_post(**override), V["post"]["body"], now=TS)
+
+
+@pytest.mark.parametrize("url", ["http://ipay.example", "http://localhost.attacker.com", "https://user:pw@ipay.example", "https://ipay.example?x=1", "ftp://ipay.example", "https://"])
+def test_the_ipay_address_must_be_https_or_a_loopback_host(url):
+    with pytest.raises(IpayError):
+        PluginConfig(url, CLIENT, "s", REQUEST, CALLBACK)
+
+
+@pytest.mark.parametrize("url", ["https://ipay.example", "https://ipay.example/", "http://localhost:8000", "http://127.0.0.1"])
+def test_good_addresses_are_accepted(url):
+    assert PluginConfig(url, CLIENT, "s", REQUEST, CALLBACK).base_url.startswith("http")
+
+
+def test_unreadable_input_to_the_receiver_is_a_plain_401_not_an_error():
+    r = receiver()
+    for headers in ({"x-client-id": CLIENT, "x-ipay-key-id": "key-1", "x-timestamp": "\u00b2", "x-ipay-nonce": "A" * 22, "x-ipay-signature": "x"},
+                    {"x-client-id": CLIENT, "x-ipay-key-id": "key-1", "x-timestamp": str(TS), "x-ipay-nonce": "A" * 22, "x-ipay-signature": "caf\u00e9"}):
+        assert r.handle("GET", "/ipay/bills/B-1", headers, "")[0] == 401
+
+
+def test_a_failing_handler_is_rolled_back_but_the_nonce_stays_claimed():
+    rolled = []
+    store = Store()
+    target = "/ipay/payments"
+    r = CallbackReceiver(CLIENT, REQUEST, [CALLBACK], store.claim, bill=lambda i: {}, record_payment=lambda p: 1 / 0, payment_event=lambda p: None, base_path="/ipay", on_failure=lambda: rolled.append(1))
+    headers, body, nonce = ipay_post(target, {"bill_id": "B-1", "amount": "1", "currency": "NGN", "reference": "x"})
+    assert r.handle("POST", target, headers, body)[0] == 500
+    assert rolled == [1]
+    assert r.handle("POST", target, headers, body)[0] == 401, "the same signed call cannot be replayed after a failure"

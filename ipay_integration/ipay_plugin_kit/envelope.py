@@ -31,7 +31,7 @@ H_NONCE = "x-ipay-nonce"
 H_SIGNATURE = "x-ipay-signature"
 MAX_SKEW = 300
 
-_NONCE = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
+_NONCE = re.compile(r"[A-Za-z0-9_-]{16,64}")
 
 
 class EnvelopeError(Exception):
@@ -60,6 +60,11 @@ class KeySet:
         if not kid or len(enc_key) != 32 or len(sign_key) != 32:
             raise EnvelopeError("keys_not_configured")
         return cls(kid, enc_key, sign_key)
+
+
+def _same(a, b) -> bool:
+    """Constant time comparison that never raises on odd input (a non-ASCII header must be a refusal, not a server error)."""
+    return hmac.compare_digest(str(a).encode("utf-8", "replace"), str(b).encode("utf-8", "replace"))
 
 
 def _b64url(raw: bytes) -> str:
@@ -123,17 +128,17 @@ def _lower(headers) -> dict:
 
 
 def _check_headers(keys: dict, client_id: str, h: dict, now: float, max_skew: int):
-    if not hmac.compare_digest(client_id, h.get(H_CLIENT, "")):
+    if not _same(client_id, h.get(H_CLIENT, "")):
         raise EnvelopeError("unknown_client")
     kid = h.get(H_KID, "")
     key_set = keys.get(kid)
     if key_set is None:
         raise EnvelopeError("unknown_key")
     timestamp = h.get(H_TIMESTAMP, "")
-    if not timestamp.isdigit() or abs(now - int(timestamp)) > max_skew:
+    if not (timestamp.isascii() and timestamp.isdigit()) or len(timestamp) > 12 or abs(now - int(timestamp)) > max_skew:
         raise EnvelopeError("stale_timestamp")
     nonce = h.get(H_NONCE, "")
-    if not _NONCE.match(nonce):
+    if not _NONCE.fullmatch(nonce):
         raise EnvelopeError("bad_nonce")
     return kid, key_set, int(timestamp), nonce
 
@@ -148,9 +153,9 @@ def open_(keys: dict, client_id: str, method: str, target: str, headers, body: s
     now = time.time() if now is None else now
     h = _lower(headers)
     kid, key_set, timestamp, nonce = _check_headers(keys, client_id, h, now, max_skew)
-    if expect_nonce is not None and not hmac.compare_digest(expect_nonce, nonce):
+    if expect_nonce is not None and not _same(expect_nonce, nonce):
         raise EnvelopeError("nonce_mismatch")
-    if not hmac.compare_digest(_signature(key_set, method, target, timestamp, nonce, body), h.get(H_SIGNATURE, "")):
+    if not _same(_signature(key_set, method, target, timestamp, nonce, body), h.get(H_SIGNATURE, "")):
         raise EnvelopeError("bad_signature")
     # Claimed only once the signature is good, so unsigned traffic cannot use up nonces.
     if claim_nonce is not None and not claim_nonce(kid, nonce):
@@ -179,7 +184,7 @@ def open_(keys: dict, client_id: str, method: str, target: str, headers, body: s
         raise EnvelopeError("bad_payload") from exc
     if not isinstance(payload, dict):
         raise EnvelopeError("bad_payload")
-    if expect_nonce is not None and not hmac.compare_digest(expect_nonce, str(payload.get("nonce", ""))):
+    if expect_nonce is not None and not _same(expect_nonce, str(payload.get("nonce", ""))):
         raise EnvelopeError("nonce_mismatch")
     return payload
 
@@ -191,7 +196,7 @@ def verify_only(keys: dict, client_id: str, method: str, target: str, headers, b
     now = time.time() if now is None else now
     h = _lower(headers)
     kid, key_set, timestamp, nonce = _check_headers(keys, client_id, h, now, max_skew)
-    if not hmac.compare_digest(_signature(key_set, method.upper(), target, timestamp, nonce, ""), h.get(H_SIGNATURE, "")):
+    if not _same(_signature(key_set, method.upper(), target, timestamp, nonce, ""), h.get(H_SIGNATURE, "")):
         raise EnvelopeError("bad_signature")
     if claim_nonce is not None and not claim_nonce(kid, nonce):
         raise EnvelopeError("replayed_nonce")

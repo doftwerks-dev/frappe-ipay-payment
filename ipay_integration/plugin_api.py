@@ -46,7 +46,10 @@ class IpayPluginRenderer(BaseRenderer):
 			return _response((401, {"Content-Type": "application/json"}, json.dumps({"error": "unauthenticated"})))
 
 		receiver = build_receiver(row, config, callback_keys)
-		target = request.full_path.rstrip("?")
+		# What iPay signed is the request target exactly as it was sent, so the raw URI is used where the server gives it.
+		raw = request.environ.get("RAW_URI") or request.environ.get("REQUEST_URI")
+		target = raw if raw and raw.startswith("/") else request.full_path
+		target = target[:-1] if target.endswith("?") else target
 		body = request.get_data(as_text=True)
 		previous_user = frappe.session.user
 		frappe.set_user("Administrator")  # after verification only: the handlers below touch records no visitor could
@@ -65,7 +68,7 @@ def build_receiver(row, config, callback_keys):
 	company = row.company
 
 	def bill(bill_id):
-		invoice = _invoice(company, bill_id, any_state=True)
+		invoice = _invoice(company, bill_id)
 		if invoice is None:
 			raise NotFound()
 		return {
@@ -90,9 +93,9 @@ def build_receiver(row, config, callback_keys):
 		if found.last_event_id == payload.get("event_id"):
 			return
 		doc = frappe.get_doc(ipay.PAYMENT_DOCTYPE, found.name)
-		doc.db_set("last_event_id", cstr(payload.get("event_id"))[:140], update_modified=False)
 		status = cstr(payment.get("status") or cstr(payload.get("event")).split(".", 1)[-1])
 		ipay.apply_status(doc, status, cstr(payment.get("id")) or None, payment.get("failure_reason"))
+		doc.db_set("last_event_id", cstr(payload.get("event_id"))[:140], update_modified=False)
 
 	return CallbackReceiver(
 		row.client_id,
@@ -103,6 +106,7 @@ def build_receiver(row, config, callback_keys):
 		record_payment=record_payment,
 		payment_event=payment_event,
 		base_path=PREFIX,
+		on_failure=frappe.db.rollback,
 	)
 
 
@@ -127,7 +131,7 @@ def prune_nonces():
 # ---------------------------------------------------------------------------
 
 
-def _invoice(company, bill_id, any_state=False):
+def _invoice(company, bill_id):
 	name = cstr(bill_id)
 	if not name or not frappe.db.exists("Purchase Invoice", name):
 		return None
@@ -142,24 +146,50 @@ def _payable(invoice):
 
 
 def record(row, payload):
-	"""Records a payment iPay made, once per `reference`. Returns {"outcome": "recorded"|"rejected"|"unknown", "erp_payment_id": str|None}."""
-	reference = cstr(payload["reference"])[:100]
-	existing = frappe.db.get_value("iPay Recording", {"reference": reference}, "payment_entry")
-	if existing:
-		return {"outcome": "recorded", "erp_payment_id": existing}
+	"""Records a payment iPay made, once per `reference`. Returns {"outcome": "recorded"|"rejected"|"unknown", "erp_payment_id": str|None}.
 
-	invoice = _invoice(row.company, payload["bill_id"])
+	Only for an invoice of this company that an open iPay Payment (one this site asked for) covers, and one call at a time per invoice."""
+	reference = cstr(payload["reference"])
+	if len(reference) > 100:
+		return {"outcome": "rejected", "erp_payment_id": None}  # never truncated: two references must never merge
+
+	name = cstr(payload["bill_id"])
+	# One recording at a time per invoice: a second call waits here, then finds the first one's recording.
+	if not frappe.db.get_value("Purchase Invoice", name, "name", for_update=True):
+		return {"outcome": "rejected", "erp_payment_id": None}
+
+	existing = frappe.db.get_value("iPay Recording", {"reference": reference}, ["payment_entry", "company"], as_dict=True)
+	if existing:
+		if existing.company != row.company:
+			return {"outcome": "rejected", "erp_payment_id": None}
+		return {"outcome": "recorded", "erp_payment_id": existing.payment_entry}
+
+	invoice = _invoice(row.company, name)
 	if invoice is None or not _payable(invoice):
 		return {"outcome": "rejected", "erp_payment_id": None}
-	try:
-		amount = flt(payload["amount"], 2)
-	except (TypeError, ValueError):
-		return {"outcome": "rejected", "erp_payment_id": None}
+	amount = flt(payload["amount"], 2)
 	if amount <= 0 or cstr(payload.get("currency")) != cstr(invoice.currency) or amount > flt(invoice.outstanding_amount, 2) + 0.005:
 		return {"outcome": "rejected", "erp_payment_id": None}
 
-	entry = _create_payment_entry(row, invoice, min(amount, flt(invoice.outstanding_amount, 2)), reference)
-	frappe.get_doc({"doctype": "iPay Recording", "reference": reference, "purchase_invoice": invoice.name, "payment_entry": entry, "amount": amount}).insert(ignore_permissions=True)
+	request = frappe.db.get_value(
+		ipay.PAYMENT_DOCTYPE,
+		{"purchase_invoice": invoice.name, "company": row.company, "status": ["in", list(ipay.OPEN_STATUSES)], "amount": [">=", amount - 0.005]},
+		"name",
+	)
+	if not request:
+		return {"outcome": "rejected", "erp_payment_id": None}  # not a payment this site asked for
+
+	try:
+		entry = _create_payment_entry(row, invoice, min(amount, flt(invoice.outstanding_amount, 2)), reference)
+	except frappe.ValidationError:
+		# An invoice on hold, a frozen account date, a missing account: a refusal iPay can show, not a 5xx it retries forever.
+		frappe.db.rollback()
+		return {"outcome": "rejected", "erp_payment_id": None}
+
+	frappe.get_doc(
+		{"doctype": "iPay Recording", "reference": reference, "company": row.company, "purchase_invoice": invoice.name, "payment_entry": entry, "amount": amount}
+	).insert(ignore_permissions=True)
+	ipay.apply_status(frappe.get_doc(ipay.PAYMENT_DOCTYPE, request), "recorded")
 	return {"outcome": "recorded", "erp_payment_id": entry}
 
 

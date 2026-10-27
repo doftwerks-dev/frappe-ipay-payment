@@ -32,6 +32,10 @@ class iPaySettings(Document):
 					)
 				)
 			seen.add(row.company)
+			if row.payment_account and frappe.db.get_value("Account", row.payment_account, "company") != row.company:
+				frappe.throw(
+					frappe._("Payment Account {0} does not belong to company {1}.").format(row.payment_account, row.company)
+				)
 
 		# provision the per-company ledger plumbing (Bank, "iPay" account,
 		# company Bank Account, Mode of Payment) and link payment_account

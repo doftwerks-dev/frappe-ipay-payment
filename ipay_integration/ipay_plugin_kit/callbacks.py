@@ -40,13 +40,15 @@ class CallbackReceiver:
     `claim_nonce(kid, nonce)` must atomically remember the nonce and return False if it was already used (use a shared store).
     """
 
-    def __init__(self, client_id: str, request_keys: KeySet, callback_keys: list[KeySet], claim_nonce: Callable[[str, str], bool], bill: Callable, record_payment: Callable, payment_event: Callable, base_path: str = ""):
+    def __init__(self, client_id: str, request_keys: KeySet, callback_keys: list[KeySet], claim_nonce: Callable[[str, str], bool], bill: Callable, record_payment: Callable, payment_event: Callable, base_path: str = "", on_failure: Callable | None = None):
         self.client_id = client_id
         self.request_keys = request_keys
         self.callback_keys = {k.kid: k for k in callback_keys}
         self.claim_nonce = claim_nonce
         self.handlers = {"bill": bill, "record_payment": record_payment, "payment_event": payment_event}
         self.base_path = base_path.rstrip("/")
+        # Called when a handler fails, so the framework can roll back whatever it half wrote (the nonce was already claimed and kept).
+        self.on_failure = on_failure
 
     def handle(self, method: str, target: str, headers, body: str) -> Reply:
         """`target` is the path plus query string exactly as the web server received it."""
@@ -63,6 +65,10 @@ class CallbackReceiver:
                 nonce = _lower(headers).get(envelope.H_NONCE, "")
         except EnvelopeError as exc:
             _log.warning("iPay callback refused: %s", exc.reason)
+            return self._plain(401)
+        except Exception:  # noqa: BLE001
+            # Whatever an unauthenticated caller sends, it is a refusal with nothing to tell it apart, never a server error.
+            _log.warning("iPay callback refused: unreadable message")
             return self._plain(401)
 
         name, arg = route
@@ -83,6 +89,11 @@ class CallbackReceiver:
         except Exception:  # noqa: BLE001
             # A server error never carries its cause; iPay retries a 5xx.
             _log.exception("iPay callback failed")
+            if self.on_failure is not None:
+                try:
+                    self.on_failure()
+                except Exception:  # noqa: BLE001
+                    _log.exception("iPay callback rollback failed")
             return self._sealed(500, target, nonce, {"error": {"code": "server_error", "message": "Something went wrong"}})
 
     # ---- plumbing -------------------------------------------------------------------------------------------------

@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass, field
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from . import envelope
 from .envelope import EnvelopeError, KeySet
@@ -39,7 +39,10 @@ class PluginConfig:
 
     def __post_init__(self):
         self.base_url = self.base_url.rstrip("/")
-        if not self.base_url.startswith("https://") and not self.base_url.startswith("http://localhost"):
+        parts = urlsplit(self.base_url)
+        # https only. Plain http is allowed for a development machine whose host is exactly localhost or a loopback address, nothing else.
+        loopback = parts.scheme == "http" and parts.hostname in ("localhost", "127.0.0.1", "::1")
+        if (parts.scheme != "https" and not loopback) or not parts.hostname or parts.username or parts.password or parts.query or parts.fragment:
             raise IpayError("The iPay address must be https")
 
 

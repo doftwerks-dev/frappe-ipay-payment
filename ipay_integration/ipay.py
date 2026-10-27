@@ -38,6 +38,7 @@ STATUS_RANK = {
 	"cancelled": 5,
 }
 OPEN_STATUSES = ("awaiting_confirm", "in_approval", "processing", "transferred")
+TERMINAL_STATUSES = ("recorded", "failed", "rejected", "cancelled")
 INVOICE_STATUS = {
 	"awaiting_confirm": "Awaiting Confirmation",
 	"in_approval": "In Approval",
@@ -120,7 +121,7 @@ def callback_keys_for(settings, row):
 	return config, keys
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def test_connection():
 	frappe.only_for("System Manager")
 	settings = frappe.get_single(SETTINGS_DOCTYPE)
@@ -240,7 +241,7 @@ def _bank_code(bank):
 	return cstr(code or bank.branch_code or "")
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def save_supplier_bank(supplier, bank, account_number):
 	"""Create or update the supplier's default Bank Account from the pay dialog. Standard permission checks apply: the caller needs
 	Bank Account write rights."""
@@ -323,7 +324,7 @@ def _open_payment(invoice):
 	return frappe._dict(rows[0]) if rows else None
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def pay_invoice(name):
 	"""Asks iPay to pay this invoice. Returns {"route", "status", "confirm_url"}: open the link in the payer's browser.
 
@@ -427,7 +428,7 @@ def _create_payment_record(doc, amount, reference, bank, email):
 	).insert(ignore_permissions=True)
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def refresh_payment_status(name):
 	"""Reads where iPay says the open payments of this invoice stand (events normally keep this current)."""
 	frappe.only_for(PAYER_ROLE)
@@ -458,10 +459,13 @@ def apply_status(record, status, ipay_payment_id=None, error=None):
 	"""A late or replayed message never moves a payment backwards."""
 	if status not in STATUS_RANK:
 		return
+	if status == "recorded" and not frappe.db.exists("iPay Recording", {"purchase_invoice": record.purchase_invoice}):
+		return  # "recorded" is only ever true once a Payment Entry was recorded here, whatever an event says
 	values = {}
 	if ipay_payment_id and not record.ipay_payment_id:
 		values["ipay_payment_id"] = ipay_payment_id
-	if STATUS_RANK[status] >= STATUS_RANK.get(record.status, 0) and status != record.status:
+	# A payment that has ended stays as it ended: a late or replayed message cannot move recorded to failed, or back.
+	if record.status not in TERMINAL_STATUSES and STATUS_RANK[status] >= STATUS_RANK.get(record.status, 0) and status != record.status:
 		values["status"] = status
 	if error:
 		values["error"] = cstr(error)[:500]
