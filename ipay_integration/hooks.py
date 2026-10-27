@@ -20,7 +20,11 @@ fixtures = [
 			["fieldname", "like", "ipay_%"],
 		],
 	},
+	{"dt": "Role", "filters": [["role_name", "=", "iPay Payer"]]},
 ]
+
+# iPay's signed calls arrive at /ipay/plugin/... (read a bill, record a payment, payment events)
+page_renderer = ["ipay_integration.plugin_api.IpayPluginRenderer"]
 
 # Apps
 # ------------------
@@ -166,13 +170,10 @@ doctype_list_js = {"Purchase Invoice": "public/js/purchase_invoice_list.js"}
 # ---------------
 
 scheduler_events = {
-	"cron": {
-		# safety net for transfers stuck in Initiated/Processing: the enqueued
-		# poll normally settles them, this catches missed jobs/worker restarts
-		"*/10 * * * *": [
-			"ipay_integration.ipay.poll_pending_transfers",
-		],
-	},
+	"hourly": [
+		# one-time nonces older than the clock window can never be replayed
+		"ipay_integration.plugin_api.prune_nonces",
+	],
 }
 
 # Testing

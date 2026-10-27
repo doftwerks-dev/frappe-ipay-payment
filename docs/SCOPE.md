@@ -1,3 +1,5 @@
+> **Status (October 2026):** version 2 follows the direction in this brief and iPay's alignment plan: iPay decides, moves the money and records the payment; this app is a thin front door that asks iPay through the plugin API and records only on iPay's signed instruction. Sections below that describe calling the transfers API directly ("Option B") are historical. See the README.
+
 # iPay Integration for ERPNext — Scope & Handoff Brief
 
 **App name:** `ipay_integration` · **Module:** "iPay Integration"
