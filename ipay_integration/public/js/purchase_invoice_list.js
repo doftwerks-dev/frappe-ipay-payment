@@ -12,11 +12,27 @@
 
 	settings.get_indicator = function (doc) {
 		if (doc.docstatus === 1) {
-			if (["Awaiting Confirmation", "In Approval", "Processing", "Transferred", "Initiated"].includes(doc.ipay_status)) {
-				return [__("iPay: {0}", [__(doc.ipay_status)]), "blue", "ipay_status,=," + doc.ipay_status];
+			if (
+				[
+					"Awaiting Confirmation",
+					"In Approval",
+					"Processing",
+					"Transferred",
+					"Initiated",
+				].includes(doc.ipay_status)
+			) {
+				return [
+					__("iPay: {0}", [__(doc.ipay_status)]),
+					"blue",
+					"ipay_status,=," + doc.ipay_status,
+				];
 			}
 			if (["Failed", "Rejected", "Cancelled"].includes(doc.ipay_status)) {
-				return [__("iPay {0}", [__(doc.ipay_status)]), "red", "ipay_status,=," + doc.ipay_status];
+				return [
+					__("iPay {0}", [__(doc.ipay_status)]),
+					"red",
+					"ipay_status,=," + doc.ipay_status,
+				];
 			}
 			if (doc.ipay_status === "Reversed") {
 				return [__("iPay Reversed"), "orange", "ipay_status,=,Reversed"];

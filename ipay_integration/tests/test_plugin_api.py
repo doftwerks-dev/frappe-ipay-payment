@@ -16,7 +16,15 @@ class TestRecord(FrappeTestCase):
 		return frappe._dict(company="Acme", payment_account="iPay - A", client_id="c")
 
 	def _invoice(self, outstanding=1000):
-		return frappe._dict(name="PINV-1", company="Acme", docstatus=1, is_return=0, currency="NGN", outstanding_amount=outstanding, status="Unpaid")
+		return frappe._dict(
+			name="PINV-1",
+			company="Acme",
+			docstatus=1,
+			is_return=0,
+			currency="NGN",
+			outstanding_amount=outstanding,
+			status="Unpaid",
+		)
 
 	def _patches(self, invoice, request="REQ-1", existing=None):
 		return (
@@ -41,34 +49,67 @@ class TestRecord(FrappeTestCase):
 	def test_a_payment_nobody_asked_for_is_rejected(self):
 		patches = self._patches(self._invoice(), request=None)
 		with patches[0], patches[1], patches[2] as pe, patches[3], patches[4]:
-			result = plugin_api.record(self._row(), {"bill_id": "PINV-1", "amount": "500.00", "currency": "NGN", "reference": "r1"})
+			result = plugin_api.record(
+				self._row(), {"bill_id": "PINV-1", "amount": "500.00", "currency": "NGN", "reference": "r1"}
+			)
 		self.assertEqual(result["outcome"], "rejected")
 		pe.assert_not_called()
 
 	def test_more_than_is_outstanding_or_another_currency_is_rejected(self):
 		patches = self._patches(self._invoice(outstanding=300))
 		with patches[0], patches[1], patches[2] as pe, patches[3], patches[4]:
-			over = plugin_api.record(self._row(), {"bill_id": "PINV-1", "amount": "500.00", "currency": "NGN", "reference": "r2"})
-			usd = plugin_api.record(self._row(), {"bill_id": "PINV-1", "amount": "100.00", "currency": "USD", "reference": "r3"})
+			over = plugin_api.record(
+				self._row(), {"bill_id": "PINV-1", "amount": "500.00", "currency": "NGN", "reference": "r2"}
+			)
+			usd = plugin_api.record(
+				self._row(), {"bill_id": "PINV-1", "amount": "100.00", "currency": "USD", "reference": "r3"}
+			)
 		self.assertEqual((over["outcome"], usd["outcome"]), ("rejected", "rejected"))
 		pe.assert_not_called()
 
 	def test_a_reference_longer_than_the_limit_is_rejected_not_truncated(self):
-		self.assertEqual(plugin_api.record(self._row(), {"bill_id": "PINV-1", "amount": "1", "currency": "NGN", "reference": "x" * 101})["outcome"], "rejected")
+		self.assertEqual(
+			plugin_api.record(
+				self._row(), {"bill_id": "PINV-1", "amount": "1", "currency": "NGN", "reference": "x" * 101}
+			)["outcome"],
+			"rejected",
+		)
 
 	def test_a_known_reference_of_another_company_is_not_answered(self):
-		patches = self._patches(self._invoice(), existing=frappe._dict(payment_entry="ACC-PAY-9", company="Other"))
+		patches = self._patches(
+			self._invoice(), existing=frappe._dict(payment_entry="ACC-PAY-9", company="Other")
+		)
 		with patches[0], patches[1], patches[2] as pe, patches[3], patches[4]:
-			result = plugin_api.record(self._row(), {"bill_id": "PINV-1", "amount": "500.00", "currency": "NGN", "reference": "r4"})
+			result = plugin_api.record(
+				self._row(), {"bill_id": "PINV-1", "amount": "500.00", "currency": "NGN", "reference": "r4"}
+			)
 		self.assertEqual(result["outcome"], "rejected")
 		pe.assert_not_called()
 
 	def test_a_validation_refusal_from_erpnext_is_a_rejection_and_rolled_back(self):
 		patches = self._patches(self._invoice())
-		with patches[0], patches[1], patch.object(plugin_api, "_create_payment_entry", side_effect=frappe.ValidationError("on hold")), patches[3], patches[4], patch.object(frappe.db, "rollback") as rollback:
-			result = plugin_api.record(self._row(), {"bill_id": "PINV-1", "amount": "500.00", "currency": "NGN", "reference": "r5"})
+		with (
+			patches[0],
+			patches[1],
+			patch.object(plugin_api, "_create_payment_entry", side_effect=frappe.ValidationError("on hold")),
+			patches[3],
+			patches[4],
+			patch.object(frappe.db, "rollback") as rollback,
+		):
+			result = plugin_api.record(
+				self._row(), {"bill_id": "PINV-1", "amount": "500.00", "currency": "NGN", "reference": "r5"}
+			)
 		self.assertEqual(result["outcome"], "rejected")
 		rollback.assert_called()
+
+	def test_bill_status_is_one_ipay_knows(self):
+		self.assertEqual(plugin_api.bill_status(self._invoice()), "open")
+		self.assertEqual(
+			plugin_api.bill_status(frappe._dict(self._invoice(outstanding=0), status="Paid")), "paid"
+		)
+		self.assertEqual(
+			plugin_api.bill_status(frappe._dict(self._invoice(), status="Debit Note Issued")), "draft"
+		)
 
 	def test_terminal_states_are_sticky(self):
 		record = frappe._dict(status="recorded", ipay_payment_id="p1", purchase_invoice="PINV-1")

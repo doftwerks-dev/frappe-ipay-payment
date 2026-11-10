@@ -141,7 +141,9 @@ function ipay_request_payment(frm) {
 				if (tab) tab.close();
 				frappe.msgprint({
 					title: __("Sent for approval"),
-					message: __("iPay sent this payment to your approvers. It is paid when the last one approves."),
+					message: __(
+						"iPay sent this payment to your approvers. It is paid when the last one approves."
+					),
 					indicator: "blue",
 				});
 				return;
@@ -151,7 +153,11 @@ function ipay_request_payment(frm) {
 				tab.location.href = res.confirm_url;
 			} else {
 				if (tab) tab.close();
-				frappe.msgprint({ title: __("iPay Payment"), message: __("iPay did not give a confirmation link. Try again."), indicator: "red" });
+				frappe.msgprint({
+					title: __("iPay Payment"),
+					message: __("iPay did not give a confirmation link. Try again."),
+					indicator: "red",
+				});
 			}
 		},
 	});

@@ -27,14 +27,19 @@ class iPaySettings(Document):
 		for row in self.accounts:
 			if row.company in seen:
 				frappe.throw(
-					frappe._("Company {0} has more than one iPay Account row. Keep one row per company.").format(
-						row.company
-					)
+					frappe._(
+						"Company {0} has more than one iPay Account row. Keep one row per company."
+					).format(row.company)
 				)
 			seen.add(row.company)
-			if row.payment_account and frappe.db.get_value("Account", row.payment_account, "company") != row.company:
+			if (
+				row.payment_account
+				and frappe.db.get_value("Account", row.payment_account, "company") != row.company
+			):
 				frappe.throw(
-					frappe._("Payment Account {0} does not belong to company {1}.").format(row.payment_account, row.company)
+					frappe._("Payment Account {0} does not belong to company {1}.").format(
+						row.payment_account, row.company
+					)
 				)
 
 		# provision the per-company ledger plumbing (Bank, "iPay" account,

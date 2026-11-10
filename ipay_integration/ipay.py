@@ -87,9 +87,15 @@ def account_by_client_id(settings, client_id):
 
 def plugin_config(settings, row):
 	"""The client configuration for one company, from the encrypted fields. Raises IPayConfigError naming what is missing, never a value."""
-	missing = [f for f in ("client_id", "key_id", *SECRET_FIELDS) if not (row.get(f) if f in ("client_id", "key_id") else row.get_password(f, raise_exception=False))]
+	missing = [
+		f
+		for f in ("client_id", "key_id", *SECRET_FIELDS)
+		if not (row.get(f) if f in ("client_id", "key_id") else row.get_password(f, raise_exception=False))
+	]
 	if missing:
-		raise IPayConfigError(frappe._("iPay Settings is incomplete for {0}: {1}").format(row.company, ", ".join(missing)))
+		raise IPayConfigError(
+			frappe._("iPay Settings is incomplete for {0}: {1}").format(row.company, ", ".join(missing))
+		)
 	try:
 		previous = None
 		if row.get_password("prev_callback_enc_key", raise_exception=False):
@@ -102,12 +108,20 @@ def plugin_config(settings, row):
 			base_url=cstr(settings.base_url),
 			client_id=cstr(row.client_id),
 			client_secret=row.get_password("client_secret"),
-			request_keys=KeySet.from_base64(row.key_id, row.get_password("request_enc_key"), row.get_password("request_sign_key")),
-			callback_keys=KeySet.from_base64(row.key_id, row.get_password("callback_enc_key"), row.get_password("callback_sign_key")),
+			request_keys=KeySet.from_base64(
+				row.key_id, row.get_password("request_enc_key"), row.get_password("request_sign_key")
+			),
+			callback_keys=KeySet.from_base64(
+				row.key_id, row.get_password("callback_enc_key"), row.get_password("callback_sign_key")
+			),
 			previous_callback_keys=previous,
 		)
 	except (EnvelopeError, IpayError) as e:
-		raise IPayConfigError(frappe._("The iPay keys for {0} are not valid ({1}).").format(row.company, getattr(e, "reason", None) or e)) from e
+		raise IPayConfigError(
+			frappe._("The iPay keys for {0} are not valid ({1}).").format(
+				row.company, getattr(e, "reason", None) or e
+			)
+		) from e
 
 
 def _client(settings, row):
@@ -129,7 +143,15 @@ def test_connection():
 	for row in settings.accounts:
 		try:
 			info = _client(settings, row).ping()
-			results.append({"company": row.company, "ok": True, "detail": frappe._("Connected ({0}, {1})").format(cstr(info.get("erp")), cstr(info.get("environment")))})
+			results.append(
+				{
+					"company": row.company,
+					"ok": True,
+					"detail": frappe._("Connected ({0}, {1})").format(
+						cstr(info.get("erp")), cstr(info.get("environment"))
+					),
+				}
+			)
 		except (IPayConfigError, IpayError) as e:
 			results.append({"company": row.company, "ok": False, "detail": cstr(e)})
 	return results
@@ -161,7 +183,9 @@ def _ensure_company_account(company):
 	if frappe.db.exists("Account", name):
 		return name
 
-	parent = frappe.db.get_value("Account", {"company": company, "account_type": "Bank", "is_group": 1}, "name")
+	parent = frappe.db.get_value(
+		"Account", {"company": company, "account_type": "Bank", "is_group": 1}, "name"
+	)
 	if not parent:
 		frappe.msgprint(
 			frappe._(
@@ -242,7 +266,7 @@ def _bank_code(bank):
 
 
 @frappe.whitelist(methods=["POST"])
-def save_supplier_bank(supplier, bank, account_number):
+def save_supplier_bank(supplier: str, bank: str, account_number: str):
 	"""Create or update the supplier's default Bank Account from the pay dialog. Standard permission checks apply: the caller needs
 	Bank Account write rights."""
 	frappe.only_for(PAYER_ROLE)
@@ -287,7 +311,7 @@ def _reference_part(value):
 
 
 @frappe.whitelist()
-def get_payment_context(name):
+def get_payment_context(name: str):
 	"""What the pay dialog shows: the outstanding amount, the supplier's saved destination bank and any request already open."""
 	frappe.only_for(PAYER_ROLE)
 	doc = frappe.get_doc("Purchase Invoice", name)
@@ -307,25 +331,43 @@ def get_payment_context(name):
 		"payment": None,
 	}
 	if bank:
-		context["bank"] = {"name": bank.name, "bank": cstr(bank.bank), "bank_account_no": cstr(bank.bank_account_no), "bank_code": _bank_code(bank)}
+		context["bank"] = {
+			"name": bank.name,
+			"bank": cstr(bank.bank),
+			"bank_account_no": cstr(bank.bank_account_no),
+			"bank_code": _bank_code(bank),
+		}
 
 	open_request = _open_payment(doc.name)
 	if open_request:
-		context["payment"] = {"name": open_request.name, "status": open_request.status, "amount": flt(open_request.amount)}
+		context["payment"] = {
+			"name": open_request.name,
+			"status": open_request.status,
+			"amount": flt(open_request.amount),
+		}
 	return context
 
 
 def _configured(row):
-	return all((row.get(f) if f in ("client_id", "key_id") else row.get_password(f, raise_exception=False)) for f in ("client_id", "key_id", *SECRET_FIELDS))
+	return all(
+		(row.get(f) if f in ("client_id", "key_id") else row.get_password(f, raise_exception=False))
+		for f in ("client_id", "key_id", *SECRET_FIELDS)
+	)
 
 
 def _open_payment(invoice):
-	rows = frappe.get_all(PAYMENT_DOCTYPE, filters={"purchase_invoice": invoice, "status": ["in", list(OPEN_STATUSES)]}, fields=["name", "status", "amount", "external_reference"], order_by="creation desc", limit=1)
+	rows = frappe.get_all(
+		PAYMENT_DOCTYPE,
+		filters={"purchase_invoice": invoice, "status": ["in", list(OPEN_STATUSES)]},
+		fields=["name", "status", "amount", "external_reference"],
+		order_by="creation desc",
+		limit=1,
+	)
 	return frappe._dict(rows[0]) if rows else None
 
 
 @frappe.whitelist(methods=["POST"])
-def pay_invoice(name):
+def pay_invoice(name: str):
 	"""Asks iPay to pay this invoice. Returns {"route", "status", "confirm_url"}: open the link in the payer's browser.
 
 	Everything is checked here, for whoever calls. The link is a secret for 30 minutes: it is returned to the caller and never stored or logged."""
@@ -341,14 +383,20 @@ def pay_invoice(name):
 
 	email = cstr(frappe.db.get_value("User", frappe.session.user, "email")).strip()
 	if not email:
-		frappe.throw(frappe._("Your user has no email address. iPay identifies who is paying by their email."))
+		frappe.throw(
+			frappe._("Your user has no email address. iPay identifies who is paying by their email.")
+		)
 
 	bank = _supplier_bank_details(doc.supplier)
 	amount = flt(doc.outstanding_amount, 2)
 
 	open_request = _open_payment(doc.name)
 	if open_request and flt(open_request.amount, 2) != amount:
-		frappe.throw(frappe._("A payment of {0} is already in progress for this invoice. Finish or cancel it in iPay first.").format(open_request.amount))
+		frappe.throw(
+			frappe._(
+				"A payment of {0} is already in progress for this invoice. Finish or cancel it in iPay first."
+			).format(open_request.amount)
+		)
 	reference = open_request.external_reference if open_request else _next_reference(doc)
 
 	try:
@@ -367,16 +415,28 @@ def pay_invoice(name):
 		frappe.throw(cstr(e))
 	except IpayError as e:
 		if e.code == "requester_not_allowed":
-			frappe.throw(frappe._("iPay does not allow {0} to pay bills. Ask the iPay administrator to give them access.").format(email))
+			frappe.throw(
+				frappe._(
+					"iPay does not allow {0} to pay bills. Ask the iPay administrator to give them access."
+				).format(email)
+			)
 		frappe.throw(frappe._("iPay could not start this payment: {0}").format(cstr(e)))
 
 	payment = answer.get("payment") or {}
 	route = cstr(payment.get("route") or answer.get("route") or "direct")
-	record = frappe.get_doc(PAYMENT_DOCTYPE, open_request.name) if open_request else _create_payment_record(doc, amount, reference, bank, email)
+	record = (
+		frappe.get_doc(PAYMENT_DOCTYPE, open_request.name)
+		if open_request
+		else _create_payment_record(doc, amount, reference, bank, email)
+	)
 	record.db_set("route", route if route in ("direct", "approval") else "direct", update_modified=False)
 	apply_status(record, cstr(payment.get("status") or "awaiting_confirm"), cstr(payment.get("id")) or None)
 
-	return {"route": route, "status": cstr(payment.get("status")), "confirm_url": None if route == "approval" else answer.get("confirm_url")}
+	return {
+		"route": route,
+		"status": cstr(payment.get("status")),
+		"confirm_url": None if route == "approval" else answer.get("confirm_url"),
+	}
 
 
 def _preflight(doc, settings, row):
@@ -395,7 +455,9 @@ def _preflight(doc, settings, row):
 	elif not row.get("payment_account"):
 		errors.append(frappe._("Company {0} has no Payment Account in iPay Settings.").format(doc.company))
 	elif not _configured(row):
-		errors.append(frappe._("iPay Settings is incomplete for {0}: the keys are missing.").format(doc.company))
+		errors.append(
+			frappe._("iPay Settings is incomplete for {0}: the keys are missing.").format(doc.company)
+		)
 	bank = _supplier_bank_details(doc.supplier)
 	if not bank or not cstr(bank.bank_account_no).strip() or not _bank_code(bank):
 		errors.append(frappe._("The supplier needs a bank account number and a bank with an iPay NIP code."))
@@ -429,7 +491,7 @@ def _create_payment_record(doc, amount, reference, bank, email):
 
 
 @frappe.whitelist(methods=["POST"])
-def refresh_payment_status(name):
+def refresh_payment_status(name: str):
 	"""Reads where iPay says the open payments of this invoice stand (events normally keep this current)."""
 	frappe.only_for(PAYER_ROLE)
 	doc = frappe.get_doc("Purchase Invoice", name)
@@ -439,7 +501,15 @@ def refresh_payment_status(name):
 	if not row:
 		frappe.throw(frappe._("Company {0} has no iPay account row in iPay Settings.").format(doc.company))
 	status = None
-	for item in frappe.get_all(PAYMENT_DOCTYPE, filters={"purchase_invoice": doc.name, "status": ["in", list(OPEN_STATUSES)], "ipay_payment_id": ["!=", ""]}, pluck="name"):
+	for item in frappe.get_all(
+		PAYMENT_DOCTYPE,
+		filters={
+			"purchase_invoice": doc.name,
+			"status": ["in", list(OPEN_STATUSES)],
+			"ipay_payment_id": ["!=", ""],
+		},
+		pluck="name",
+	):
 		record = frappe.get_doc(PAYMENT_DOCTYPE, item)
 		try:
 			data = _client(settings, row).payment(record.ipay_payment_id)
@@ -459,13 +529,19 @@ def apply_status(record, status, ipay_payment_id=None, error=None):
 	"""A late or replayed message never moves a payment backwards."""
 	if status not in STATUS_RANK:
 		return
-	if status == "recorded" and not frappe.db.exists("iPay Recording", {"purchase_invoice": record.purchase_invoice}):
+	if status == "recorded" and not frappe.db.exists(
+		"iPay Recording", {"purchase_invoice": record.purchase_invoice}
+	):
 		return  # "recorded" is only ever true once a Payment Entry was recorded here, whatever an event says
 	values = {}
 	if ipay_payment_id and not record.ipay_payment_id:
 		values["ipay_payment_id"] = ipay_payment_id
 	# A payment that has ended stays as it ended: a late or replayed message cannot move recorded to failed, or back.
-	if record.status not in TERMINAL_STATUSES and STATUS_RANK[status] >= STATUS_RANK.get(record.status, 0) and status != record.status:
+	if (
+		record.status not in TERMINAL_STATUSES
+		and STATUS_RANK[status] >= STATUS_RANK.get(record.status, 0)
+		and status != record.status
+	):
 		values["status"] = status
 	if error:
 		values["error"] = cstr(error)[:500]
@@ -476,7 +552,13 @@ def apply_status(record, status, ipay_payment_id=None, error=None):
 
 def _sync_invoice(record):
 	"""The invoice shows the latest request's status."""
-	latest = frappe.get_all(PAYMENT_DOCTYPE, filters={"purchase_invoice": record.purchase_invoice}, fields=["status", "ipay_payment_id", "external_reference", "error"], order_by="creation desc", limit=1)
+	latest = frappe.get_all(
+		PAYMENT_DOCTYPE,
+		filters={"purchase_invoice": record.purchase_invoice},
+		fields=["status", "ipay_payment_id", "external_reference", "error"],
+		order_by="creation desc",
+		limit=1,
+	)
 	if not latest:
 		return
 	latest = latest[0]

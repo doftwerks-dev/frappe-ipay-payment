@@ -27,9 +27,17 @@ class TestFrontDoor(FrappeTestCase):
 	def test_a_known_later_status_is_applied(self):
 		record = frappe._dict(status="processing", ipay_payment_id="p1", purchase_invoice="PINV-1")
 		record.db_set = MagicMock()
-		with patch.object(ipay, "_sync_invoice"):
+		# "recorded" is only applied once a Payment Entry was recorded here (an iPay Recording exists).
+		with patch.object(ipay, "_sync_invoice"), patch.object(frappe.db, "exists", return_value=True):
 			ipay.apply_status(record, "recorded")
 		record.db_set.assert_any_call("status", "recorded", update_modified=True)
+
+	def test_a_later_open_status_is_applied(self):
+		record = frappe._dict(status="awaiting_confirm", ipay_payment_id="p1", purchase_invoice="PINV-1")
+		record.db_set = MagicMock()
+		with patch.object(ipay, "_sync_invoice"):
+			ipay.apply_status(record, "processing")
+		record.db_set.assert_any_call("status", "processing", update_modified=True)
 
 	def test_an_unknown_status_is_ignored(self):
 		record = frappe._dict(status="processing", ipay_payment_id="p1", purchase_invoice="PINV-1")
@@ -39,26 +47,48 @@ class TestFrontDoor(FrappeTestCase):
 		record.db_set.assert_not_called()
 
 	def test_only_ipay_payers_may_start_a_payment(self):
+		# frappe.only_for() lets everyone through while tests run (flags.in_test), so the check is switched back on here.
+		in_test = frappe.flags.in_test
 		frappe.set_user("Guest")
+		frappe.flags.in_test = False
 		try:
 			with self.assertRaises(frappe.PermissionError):
 				ipay.pay_invoice("ANY")
 		finally:
+			frappe.flags.in_test = in_test
 			frappe.set_user("Administrator")
 
 	def test_ipay_refusing_the_person_is_said_plainly(self):
 		client = MagicMock()
 		client.request_payment.side_effect = IpayError("no", code="requester_not_allowed", status=403)
-		doc = frappe._dict(name="PINV-1", company="Acme", supplier="S", supplier_name="S", outstanding_amount=100, currency="NGN", docstatus=1)
+		doc = frappe._dict(
+			name="PINV-1",
+			company="Acme",
+			supplier="S",
+			supplier_name="S",
+			outstanding_amount=100,
+			currency="NGN",
+			docstatus=1,
+		)
 		doc.check_permission = lambda *_: None
-		with patch.object(ipay, "_client", return_value=client), patch.object(ipay, "_preflight", return_value=[]), patch.object(
-			ipay, "_open_payment", return_value=None
-		), patch.object(ipay, "_next_reference", return_value="r"), patch.object(
-			ipay, "_supplier_bank_details", return_value=frappe._dict(bank_account_no="0123456789", bank="B")
-		), patch.object(ipay, "_bank_code", return_value="058"), patch.object(frappe, "get_doc", return_value=doc), patch.object(
-			frappe, "only_for"
-		), patch.object(frappe.db, "get_value", return_value="ada@acme.test"), patch.object(frappe, "get_single", return_value=frappe._dict(accounts=[frappe._dict(company="Acme")])), patch.object(
-			ipay, "_find_account", return_value=frappe._dict(company="Acme")
+		with (
+			patch.object(ipay, "_client", return_value=client),
+			patch.object(ipay, "_preflight", return_value=[]),
+			patch.object(ipay, "_open_payment", return_value=None),
+			patch.object(ipay, "_next_reference", return_value="r"),
+			patch.object(
+				ipay,
+				"_supplier_bank_details",
+				return_value=frappe._dict(bank_account_no="0123456789", bank="B"),
+			),
+			patch.object(ipay, "_bank_code", return_value="058"),
+			patch.object(frappe, "get_doc", return_value=doc),
+			patch.object(frappe, "only_for"),
+			patch.object(frappe.db, "get_value", return_value="ada@acme.test"),
+			patch.object(
+				frappe, "get_single", return_value=frappe._dict(accounts=[frappe._dict(company="Acme")])
+			),
+			patch.object(ipay, "_find_account", return_value=frappe._dict(company="Acme")),
 		):
 			with self.assertRaises(frappe.ValidationError):
 				ipay.pay_invoice("PINV-1")

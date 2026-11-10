@@ -19,7 +19,9 @@ frappe.ui.form.on("iPay Settings", {
 					if (!rows.length) {
 						frappe.msgprint({
 							title: __("iPay Connection Test"),
-							message: __("No iPay accounts configured yet. Add a row and save first."),
+							message: __(
+								"No iPay accounts configured yet. Add a row and save first."
+							),
 							indicator: "orange",
 						});
 						return;
@@ -27,8 +29,9 @@ frappe.ui.form.on("iPay Settings", {
 					const html = rows
 						.map(
 							(x) =>
-								`${x.ok ? "✅" : "❌"} <strong>${frappe.utils.escape_html(x.company)}</strong>: ` +
-								frappe.utils.escape_html(x.detail)
+								`${x.ok ? "✅" : "❌"} <strong>${frappe.utils.escape_html(
+									x.company
+								)}</strong>: ` + frappe.utils.escape_html(x.detail)
 						)
 						.join("<br>");
 					frappe.msgprint({
