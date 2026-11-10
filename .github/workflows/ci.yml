@@ -77,7 +77,12 @@ jobs:
             ${{ runner.os }}-yarn-
 
       - name: Install MariaDB Client
-        run: sudo apt-get install -y mariadb-client
+        run: |
+          sudo apt-get install -y mariadb-client
+          # Newer MariaDB clients require TLS by default; the throwaway mariadb service has none. Applies to bench's own
+          # client calls too (site restore), not only the commands below. CI only: production sites keep their own settings.
+          printf '[client-mariadb]\nskip-ssl\n' > ~/.my.cnf
+          mariadb --version
 
       - name: Setup
         run: |

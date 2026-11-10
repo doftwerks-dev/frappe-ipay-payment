@@ -38,7 +38,9 @@ class TestPluginRoute(FrappeTestCase):
 
 		return (
 			patch.object(frappe, "get_single", side_effect=fake_get_single),
-			patch.object(ipay, "callback_keys_for", return_value=(frappe._dict(request_keys=REQUEST), [CALLBACK])),
+			patch.object(
+				ipay, "callback_keys_for", return_value=(frappe._dict(request_keys=REQUEST), [CALLBACK])
+			),
 		)
 
 	def _post(self, path, headers, body):
@@ -89,7 +91,9 @@ class TestPluginRoute(FrappeTestCase):
 		signed = envelope.sign_only(CALLBACK, CLIENT, "GET", path)
 		settings_patch, keys_patch = self._registered()
 		with settings_patch, keys_patch:
-			response = make_request(target=self.client.get, args=(path,), kwargs={"headers": signed["headers"]})
+			response = make_request(
+				target=self.client.get, args=(path,), kwargs={"headers": signed["headers"]}
+			)
 
 		self.assertEqual(response.status_code, 404, response.get_data(as_text=True))
 		self.assertEqual(self._open_answer(response, path, signed["nonce"])["error"]["code"], "not_found")
