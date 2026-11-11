@@ -54,6 +54,10 @@ token and the finance PIN, and nothing they type passes through ERPNext. The dia
 - The confirmation link is a secret for 30 minutes: it goes straight to the payer's browser and is never stored or logged. So is the
   panel's launch address (single use, 2 minutes).
 - A payment made in iPay's panel is recorded only for an invoice this site opened the panel for.
+- iPay's calls are checked as a visitor. Only a verified call runs, and it runs as the service user
+  `ipay.callbacks@ipay-integration.invalid`, never as Administrator. That user has ERPNext's Accounts User role and nothing else, no
+  password, and may sign in only from the server itself. Install creates it; every migrate takes away any role added to it by hand.
+  Disabling it stops iPay's callbacks (iPay retries them) until it is enabled again.
 - ERPNext keeps only the last four digits of the supplier account on its own request record.
 
 ### Upgrading from version 1

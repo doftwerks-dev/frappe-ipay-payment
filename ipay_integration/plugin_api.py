@@ -9,7 +9,8 @@
 
 Every call is verified by the plugin kit before anything is read: the client, the key id, a five minute clock window, the HMAC
 signature and a nonce never seen before; the body is AES-256-GCM encrypted. A failure is a plain 401 with the reason only in the log.
-Handlers run as the site's system user for the one company the verified client belongs to, never as a visitor.
+Verification runs as the visitor. Only then does a handler run, for the one company the verified client belongs to, as iPay's
+service user (service_user.py: Accounts User, no password, never Administrator).
 """
 
 import json
@@ -19,7 +20,7 @@ from frappe.utils import cstr, flt, nowdate
 from frappe.website.page_renderers.base_renderer import BaseRenderer
 from werkzeug.wrappers import Response
 
-from ipay_integration import ipay
+from ipay_integration import ipay, service_user
 from ipay_integration.ipay_plugin_kit import CallbackReceiver, NotFound
 
 PREFIX = "/ipay/plugin"
@@ -59,13 +60,31 @@ class IpayPluginRenderer(BaseRenderer):
 		target = raw if raw and raw.startswith("/") else request.full_path
 		target = target[:-1] if target.endswith("?") else target
 		body = request.get_data(as_text=True)
-		previous_user = frappe.session.user
-		# Reviewed: the receiver verifies the call before any handler runs, and the handlers touch records no visitor could.
-		frappe.set_user("Administrator")  # nosemgrep: frappe-setuser
+		return _response(receiver.handle(request.method, target, dict(request.headers), body))
+
+
+def as_service_user(handler):
+	"""Runs a handler as iPay's service user. The receiver calls handlers only after the call is verified, so verification itself runs as
+	the visitor; the user before is put back whatever the handler does."""
+
+	def run(*args):
+		user = service_user.ready()
+		if not user:
+			# Logged to the file, not the database: the receiver rolls the database back when a handler fails. iPay retries the call.
+			frappe.logger("ipay_integration").error(
+				"iPay callback refused: the service user %s is missing or disabled (run bench migrate, or enable it)",
+				service_user.SERVICE_USER,
+			)
+			raise RuntimeError("iPay's service user is missing or disabled")
+		previous = frappe.session.user
+		# Reviewed: only after verification, and as a user with Accounts User alone (service_user.py), never Administrator.
+		frappe.set_user(user)  # nosemgrep: frappe-setuser
 		try:
-			return _response(receiver.handle(request.method, target, dict(request.headers), body))
+			return handler(*args)
 		finally:
-			frappe.set_user(previous_user)  # nosemgrep: frappe-setuser
+			frappe.set_user(previous)  # nosemgrep: frappe-setuser
+
+	return run
 
 
 def _response(reply):
@@ -118,9 +137,9 @@ def build_receiver(row, config, callback_keys):
 		config.request_keys,
 		callback_keys,
 		claim_nonce,
-		bill=bill,
-		record_payment=record_payment,
-		payment_event=payment_event,
+		bill=as_service_user(bill),
+		record_payment=as_service_user(record_payment),
+		payment_event=as_service_user(payment_event),
 		base_path=PREFIX,
 		on_failure=frappe.db.rollback,
 	)
