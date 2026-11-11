@@ -155,6 +155,9 @@ class TestRecordingThroughTheRoute(FrappeTestCase):
 			args=(path,),
 			kwargs={"data": sealed["body"], "headers": sealed["headers"], "content_type": "application/json"},
 		)
+		# The request committed on its own connection. End this connection's read snapshot (MariaDB repeatable read) so what the
+		# test reads next includes it; nothing of the test's own is pending here, its setup was committed before the first call.
+		frappe.db.rollback()
 		body = response.get_data(as_text=True)
 		self.assertEqual(response.status_code, 200, body)
 		answer = envelope.open_(
