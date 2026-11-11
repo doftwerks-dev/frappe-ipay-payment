@@ -99,7 +99,7 @@ def build_receiver(row, config, callback_keys):
 		invoice = _invoice(company, bill_id)
 		if invoice is None:
 			raise NotFound()
-		return {
+		answer = {
 			"id": invoice.name,
 			"number": cstr(invoice.bill_no or invoice.name),
 			"supplier_id": cstr(invoice.supplier),
@@ -111,6 +111,11 @@ def build_receiver(row, config, callback_keys):
 			"raw_status": cstr(invoice.status),
 			"due_date": cstr(invoice.due_date or "") or None,
 		}
+		# The supplier's account, when it is usable: in iPay's panel inside ERPNext it takes precedence over typing one.
+		supplier_bank = ipay.supplier_bank_for_ipay(invoice.supplier)
+		if supplier_bank:
+			answer["supplier_bank"] = supplier_bank
+		return answer
 
 	def record_payment(payload):
 		return record(row, payload)

@@ -263,6 +263,20 @@ def _supplier_bank_details(supplier):
 	return bank or frappe.db.get_value("Bank Account", filters, fields, as_dict=True)
 
 
+def supplier_bank_for_ipay(supplier):
+	"""The supplier's account as iPay reads it with a bill (GET /bills/{id}: `supplier_bank`), or None when it is not usable: the same account
+	and NIP code Pay with iPay sends when it asks iPay directly. In iPay's panel inside ERPNext this account takes precedence; iPay still
+	checks it with the bank, records it, and holds a new or changed one. Without it, the person adds the account in the panel."""
+	bank = _supplier_bank_details(supplier)
+	if not bank:
+		return None
+	number = cstr(bank.bank_account_no).strip()
+	code = _bank_code(bank)
+	if not code or not re.fullmatch(r"\d{10}", number):
+		return None
+	return {"bank_code": code, "account_number": number}
+
+
 def _bank_code(bank):
 	"""NIP code for a supplier Bank Account row: the curated code on the Bank master first, the row's own Branch Code as fallback."""
 	code = bank.bank and frappe.db.get_value("Bank", bank.bank, "ipay_nip_code")
@@ -408,7 +422,9 @@ def open_panel(name: str):
 
 	try:
 		client = _client(settings, row)
-		answer = client.panel_launch(doc.name)
+		# Only fills in the panel's email box; the person can change it, and iPay sends its sign-in token only to an iPay user of the company.
+		email = cstr(frappe.db.get_value("User", frappe.session.user, "email")).strip() or None
+		answer = client.panel_launch(doc.name, email=email)
 	except IPayConfigError as e:
 		frappe.throw(cstr(e))
 	except IpayError as e:
