@@ -29,6 +29,7 @@ erpnext = ">=15.0.0,<16.0.0"
 packages = []
 
 [tool.ruff]
+extend-exclude = ["ipay_integration/ipay_plugin_kit"]
 line-length = 110
 target-version = "py310"
 
