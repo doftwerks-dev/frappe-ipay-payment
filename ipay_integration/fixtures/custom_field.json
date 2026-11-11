@@ -23,10 +23,10 @@
   "in_standard_filter": 1,
   "insert_after": "ipay_section",
   "label": "iPay Status",
-  "modified": "2026-09-07 09:00:00.000000",
+  "modified": "2026-10-29 09:00:00.000000",
   "name": "Purchase Invoice-ipay_status",
   "no_copy": 1,
-  "options": "\nInitiated\nProcessing\nPaid\nFailed\nReversed",
+  "options": "\nAwaiting Confirmation\nIn Approval\nProcessing\nTransferred\nPaid\nFailed\nRejected\nCancelled\nInitiated\nReversed",
   "read_only": 1
  },
  {

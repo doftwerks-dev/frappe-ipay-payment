@@ -77,7 +77,12 @@ jobs:
             ${{ runner.os }}-yarn-
 
       - name: Install MariaDB Client
-        run: sudo apt-get install -y mariadb-client
+        run: |
+          sudo apt-get install -y mariadb-client
+          # Newer MariaDB clients require TLS by default; the throwaway mariadb service has none. Applies to bench's own
+          # client calls too (site restore), not only the commands below. CI only: production sites keep their own settings.
+          printf '[client-mariadb]\nskip-ssl\n' > ~/.my.cnf
+          mariadb --version
 
       - name: Setup
         run: |
@@ -108,3 +113,87 @@ jobs:
           bench --site test_site run-tests --app ipay_integration
         env:
           TYPE: server
+
+  upgrade:
+    runs-on: ubuntu-latest
+    name: Upgrade from version 1
+
+    services:
+      redis-cache:
+        image: redis:alpine
+        ports:
+          - 13000:6379
+      redis-queue:
+        image: redis:alpine
+        ports:
+          - 11000:6379
+      mariadb:
+        image: mariadb:11.8
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: --health-cmd="mariadb-admin ping" --health-interval=5s --health-timeout=2s --health-retries=3
+
+    steps:
+      - name: This change
+        uses: actions/checkout@v4
+        with:
+          path: pr
+
+      - name: Version 1 (the last version 1 commit on version-16, so the job stays the same after version 2 is merged)
+        uses: actions/checkout@v4
+        with:
+          ref: f56ed2c5edf2b3a03829abd85d69db4f79623d64
+          path: v1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: MariaDB client
+        run: |
+          sudo apt-get install -y mariadb-client
+          printf '[client-mariadb]\nskip-ssl\n' > ~/.my.cnf
+
+      - name: A version 1 site
+        run: |
+          pip install frappe-bench
+          bench init --skip-redis-config-generation --skip-assets --frappe-branch version-16 --python "$(which python)" ~/frappe-bench
+          mariadb --host 127.0.0.1 --port 3306 -u root -proot -e "SET GLOBAL character_set_server = 'utf8mb4'"
+          mariadb --host 127.0.0.1 --port 3306 -u root -proot -e "SET GLOBAL collation_server = 'utf8mb4_unicode_ci'"
+          cd ~/frappe-bench
+          bench get-app erpnext --branch version-16
+          bench get-app ipay_integration $GITHUB_WORKSPACE/v1
+          bench setup requirements --dev
+          bench new-site --db-root-password root --admin-password admin test_site
+          bench --site test_site install-app erpnext
+          bench --site test_site install-app ipay_integration
+          cd sites && ../env/bin/python $GITHUB_WORKSPACE/pr/.github/upgrade_check.py before test_site
+        env:
+          CI: 'Yes'
+
+      - name: Upgrade to version 2 and migrate
+        working-directory: /home/runner/frappe-bench
+        run: |
+          rsync -a --delete --exclude .git $GITHUB_WORKSPACE/pr/ apps/ipay_integration/
+          bench --site test_site migrate
+
+      - name: Check what the upgrade promises
+        working-directory: /home/runner/frappe-bench/sites
+        run: ../env/bin/python $GITHUB_WORKSPACE/pr/.github/upgrade_check.py after test_site
+
+  kit:
+    runs-on: ubuntu-latest
+    name: Plugin kit
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install cryptography requests pytest
+      - run: pytest -q kit_tests
