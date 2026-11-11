@@ -10,6 +10,7 @@ throwaway test site; the names carry a random part so the test can run again on 
 
 import base64
 import os
+from unittest.mock import MagicMock, patch
 
 import frappe
 from frappe.tests.test_api import make_request
@@ -101,10 +102,11 @@ class TestRecordingThroughTheRoute(FrappeTestCase):
 		return account
 
 	def _invoice(self, amount):
+		unique = frappe.generate_hash(length=8)
 		supplier = frappe.get_doc(
 			{
 				"doctype": "Supplier",
-				"supplier_name": f"iPay Test Supplier {self.suffix}",
+				"supplier_name": f"iPay Test Supplier {unique}",
 				"supplier_group": frappe.db.get_value("Supplier Group", {"is_group": 0}),
 				"default_currency": "NGN",
 			}
@@ -117,7 +119,7 @@ class TestRecordingThroughTheRoute(FrappeTestCase):
 				"currency": "NGN",
 				"conversion_rate": 1,
 				"buying_price_list": PRICE_LIST,
-				"bill_no": f"BILL-{self.suffix}",
+				"bill_no": f"BILL-{unique}",
 				"items": [{"item_code": ITEM, "qty": 1, "rate": amount}],
 			}
 		)
@@ -143,20 +145,26 @@ class TestRecordingThroughTheRoute(FrappeTestCase):
 	# ---- iPay's side -----------------------------------------------------------------------------------------------------
 
 	def _ipay_records(self, payload):
-		"""What iPay sends: sealed with the callback keys. Returns the status and the answer, opened with the request keys."""
-		sealed = envelope.seal(self.callback_keys, CLIENT, "POST", PATH, payload)
+		return self._ipay_posts(PATH, payload)
+
+	def _ipay_posts(self, path, payload):
+		"""What iPay sends: sealed with the callback keys. Returns the answer, opened with the request keys."""
+		sealed = envelope.seal(self.callback_keys, CLIENT, "POST", path, payload)
 		response = make_request(
 			target=self.client.post,
-			args=(PATH,),
+			args=(path,),
 			kwargs={"data": sealed["body"], "headers": sealed["headers"], "content_type": "application/json"},
 		)
+		# The request committed on its own connection. End this connection's read snapshot (MariaDB repeatable read) so what the
+		# test reads next includes it; nothing of the test's own is pending here, its setup was committed before the first call.
+		frappe.db.rollback()
 		body = response.get_data(as_text=True)
 		self.assertEqual(response.status_code, 200, body)
 		answer = envelope.open_(
 			{self.request_keys.kid: self.request_keys},
 			CLIENT,
 			envelope.RESPONSE,
-			PATH,
+			path,
 			dict(response.headers.items()),
 			body,
 			expect_nonce=sealed["nonce"],
@@ -208,3 +216,103 @@ class TestRecordingThroughTheRoute(FrappeTestCase):
 			"recorded",
 		)
 		self.assertEqual(frappe.db.count("iPay Recording", {"reference": reference}), 1)
+
+	def test_a_payment_made_in_ipays_panel_inside_erpnext_is_adopted_and_recorded_once(self):
+		self._company()
+		self._settings()
+		invoice = self._invoice(2500)
+		not_opened = self._invoice(700)
+
+		# Pay with iPay, for a company that pays inside ERPNext: iPay answers with its panel's address (stubbed here, nothing else is).
+		launch = MagicMock()
+		launch.config.base_url = "https://ipay.example"
+		launch.panel_launch.return_value = {
+			"panel_url": "https://ipay.example/erp-payments/in-erp/c#l=once",
+			"expires_in": 120,
+		}
+		with patch.object(ipay, "_client", return_value=launch):
+			opened = ipay.open_panel(invoice.name)
+			reopened = ipay.open_panel(invoice.name)
+		self.assertEqual(opened["panel_url"], "https://ipay.example/erp-payments/in-erp/c#l=once")
+		self.assertEqual(reopened, opened)
+		waiting = frappe.get_all(
+			ipay.PAYMENT_DOCTYPE,
+			filters={"purchase_invoice": invoice.name},
+			fields=["external_reference", "route"],
+		)
+		self.assertEqual(len(waiting), 1, "opening the panel twice keeps one waiting launch")
+		self.assertTrue(waiting[0].external_reference.startswith(ipay.PANEL_LAUNCH_PREFIX))
+		self.assertEqual(waiting[0].route, "panel")
+		self.assertFalse(
+			frappe.db.get_value("Purchase Invoice", invoice.name, "ipay_status"),
+			"nothing shown until iPay reports",
+		)
+
+		# An address that is not iPay's own is never framed.
+		launch.panel_launch.return_value = {"panel_url": "https://evil.example/erp-payments/in-erp/c#l=x"}
+		with patch.object(ipay, "_client", return_value=launch), self.assertRaises(frappe.ValidationError):
+			ipay.open_panel(invoice.name)
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit - the requests are served on another connection
+
+		# iPay reports the payment made in the panel; its reference is iPay's own.
+		reference = f"panel-{self.suffix}-0000-4000-8000-000000000000"
+
+		def event(bill, status, ref=reference):
+			payment = {"id": f"pay_{self.suffix}", "status": status, "bill_id": bill, "amount": "2500.00"}
+			payment["origin"] = {"name": "ERPNext", "bill_url": None, "in_erp": True}
+			return {
+				"event_id": f"pay_{self.suffix}:{status}",
+				"event": f"payment.{status}",
+				"external_reference": ref,
+				"occurred_at": "2026-11-11T09:00:00Z",
+				"payment": payment,
+			}
+
+		self.assertEqual(
+			self._ipay_posts("/ipay/plugin/payment-events", event(invoice.name, "processing")),
+			{"received": True},
+		)
+		self._ipay_posts(
+			"/ipay/plugin/payment-events", event(not_opened.name, "processing", ref=reference + "-x")
+		)
+
+		adopted = frappe.db.get_value(
+			ipay.PAYMENT_DOCTYPE,
+			{"purchase_invoice": invoice.name},
+			["external_reference", "ipay_payment_id", "status", "amount"],
+			as_dict=True,
+		)
+		self.assertEqual(adopted.external_reference, reference)
+		self.assertEqual(adopted.ipay_payment_id, f"pay_{self.suffix}")
+		self.assertEqual(adopted.status, "processing")
+		self.assertEqual(frappe.db.get_value("Purchase Invoice", invoice.name, "ipay_status"), "Processing")
+		self.assertFalse(
+			frappe.db.exists(ipay.PAYMENT_DOCTYPE, {"purchase_invoice": not_opened.name}),
+			"a panel payment for an invoice this site opened no panel for is not taken",
+		)
+
+		# iPay records it, once.
+		recorded = f"qck-trsf_{self.suffix}"
+		payload = {"bill_id": invoice.name, "amount": "2500.00", "currency": "NGN", "reference": recorded}
+		first = self._ipay_records(payload)
+		self.assertEqual(first["outcome"], "recorded", first)
+		self.assertEqual(self._ipay_records(payload), first)
+		self.assertEqual(frappe.db.count("Payment Entry", {"reference_no": recorded, "docstatus": 1}), 1)
+		self.assertEqual(frappe.db.get_value("Purchase Invoice", invoice.name, "status"), "Paid")
+		self.assertEqual(
+			frappe.db.get_value(ipay.PAYMENT_DOCTYPE, {"external_reference": reference}, "status"), "recorded"
+		)
+
+		# Recording a payment for an invoice this site asked nothing for is refused, panel or not.
+		self.assertEqual(
+			self._ipay_records(
+				{
+					"bill_id": not_opened.name,
+					"amount": "700.00",
+					"currency": "NGN",
+					"reference": recorded + "-x",
+				}
+			)["outcome"],
+			"rejected",
+			"a payment for an invoice this site asked nothing for is refused",
+		)

@@ -88,6 +88,15 @@ class IpayClient:
     def payment(self, payment_id: str) -> dict:
         return self._get("/payments/" + quote(payment_id, safe=""))
 
+    def mode(self) -> dict:
+        """{"pay_inside": bool}: whether the company pays this system's bills from inside it, through iPay's panel."""
+        return self._get("/mode")
+
+    def panel_launch(self, bill_id: str) -> dict:
+        """A one-time launch of iPay's panel for one bill: {"panel_url", "expires_in"}. The URL is a secret until it is used (its
+        fragment works once, for 2 minutes): show it in the payer's browser at once, never store or log it."""
+        return self._post("/panel-launches", {"bill_id": bill_id})
+
     # ---- plumbing -------------------------------------------------------------------------------------------------
 
     def _get(self, path: str) -> dict:

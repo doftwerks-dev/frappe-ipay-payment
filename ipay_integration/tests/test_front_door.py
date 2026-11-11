@@ -97,3 +97,17 @@ class TestFrontDoor(FrappeTestCase):
 		key = frappe.generate_hash(length=22)
 		self.assertTrue(plugin_api.claim_nonce("k", key))
 		self.assertFalse(plugin_api.claim_nonce("k", key))
+
+	def test_only_ipays_own_address_is_framed(self):
+		base = "https://ipay.example"
+		self.assertTrue(ipay.is_ipay_address(base, "https://ipay.example/erp-payments/in-erp/c#l=x"))
+		for url in (
+			"https://evil.example/erp-payments/in-erp/c",
+			"http://ipay.example/erp-payments/in-erp/c",
+			"https://ipay.example:8443/erp-payments/in-erp/c",
+			"https://user:pw@ipay.example/erp-payments/in-erp/c",
+			"https://ipay.example.evil.example/x",
+			"javascript:alert(1)",
+			"",
+		):
+			self.assertFalse(ipay.is_ipay_address(base, url), url)

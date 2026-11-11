@@ -2,6 +2,8 @@
 // It asks iPay to pay the invoice and opens iPay's confirmation page, where the payer enters their iPay password, the company
 // finance PIN and an emailed code. Nothing secret is here: no keys, no PIN, no transfer call. iPay tells ERPNext (signed) when the
 // payment moves, and the Payment Entry is recorded then.
+// Where the company chose in iPay to pay its ERPNext bills from here, it opens iPay's own panel in a dialog instead; the payer signs
+// in there (an emailed token and the finance PIN), and the same signed calls report and record the payment.
 
 const IPAY_OPEN = ["Awaiting Confirmation", "In Approval", "Processing", "Transferred"];
 
@@ -53,9 +55,58 @@ function ipay_open_dialog(frm) {
 				});
 				return;
 			}
+			// The company chose, in iPay, to pay its ERPNext bills here: iPay's own panel, framed on this page.
+			if (ctx.pay_inside) {
+				ipay_open_panel(frm);
+				return;
+			}
 			ipay_show_dialog(frm, ctx);
 		},
 	});
+}
+
+function ipay_open_panel(frm) {
+	frappe.call({
+		method: "ipay_integration.ipay.open_panel",
+		args: { name: frm.doc.name },
+		freeze: true,
+		freeze_message: __("Opening iPay..."),
+		callback: (r) => {
+			const res = r.message || {};
+			if (!res.panel_url) {
+				frappe.msgprint({
+					title: __("iPay Payment"),
+					message: __("iPay did not open its panel. Try again."),
+					indicator: "red",
+				});
+				return;
+			}
+			ipay_show_panel(frm, res.panel_url);
+		},
+	});
+}
+
+function ipay_show_panel(frm, panel_url) {
+	const d = new frappe.ui.Dialog({
+		title: __("Pay with iPay"),
+		size: "extra-large",
+		// a click outside or Escape must not close a payment half way through
+		static: true,
+		fields: [{ fieldtype: "HTML", fieldname: "panel" }],
+	});
+
+	// The address carries a one-time launch (it works once, for 2 minutes): it goes into the frame and nowhere else, never into the
+	// page's HTML, storage or a log. The payer signs in inside iPay's panel; nothing they type passes through ERPNext.
+	const frame = document.createElement("iframe");
+	frame.src = panel_url;
+	frame.title = __("iPay");
+	frame.referrerPolicy = "no-referrer";
+	frame.style.cssText = "display: block; width: 100%; height: 75vh; border: 0;";
+	d.fields_dict.panel.$wrapper.empty().append(frame);
+
+	// iPay tells ERPNext by its signed calls how the payment went; the form shows it once the panel is closed.
+	d.onhide = () => frm.reload_doc();
+	d.show();
 }
 
 function ipay_show_dialog(frm, ctx) {
