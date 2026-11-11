@@ -19,6 +19,7 @@ from frappe.utils import flt, get_test_client
 
 from ipay_integration import ipay
 from ipay_integration.ipay_plugin_kit import KeySet, envelope
+from ipay_integration.service_user import SERVICE_USER
 
 COMPANY = "iPay Recording Test Co"
 ABBR = "IRTC"
@@ -194,7 +195,7 @@ class TestRecordingThroughTheRoute(FrappeTestCase):
 		entries = frappe.get_all(
 			"Payment Entry",
 			filters={"reference_no": reference},
-			fields=["name", "docstatus", "paid_from", "mode_of_payment", "paid_amount", "party"],
+			fields=["name", "docstatus", "paid_from", "mode_of_payment", "paid_amount", "party", "owner"],
 		)
 		self.assertEqual(len(entries), 1, entries)
 		entry = entries[0]
@@ -204,6 +205,7 @@ class TestRecordingThroughTheRoute(FrappeTestCase):
 		self.assertEqual(entry.mode_of_payment, ipay.MODE_OF_PAYMENT)
 		self.assertEqual(flt(entry.paid_amount), 1000)
 		self.assertEqual(entry.party, invoice.supplier)
+		self.assertEqual(entry.owner, SERVICE_USER, "made by iPay's service user, not Administrator")
 
 		paid = frappe.db.get_value(
 			"Purchase Invoice", invoice.name, ["outstanding_amount", "status", "ipay_status"], as_dict=True

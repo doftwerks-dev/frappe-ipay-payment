@@ -104,7 +104,9 @@ doctype_list_js = {"Purchase Invoice": "public/js/purchase_invoice_list.js"}
 # ------------
 
 # before_install = "ipay_integration.install.before_install"
-# after_install = "ipay_integration.install.after_install"
+# iPay's callbacks run as a service user (service_user.py): created on install, its roles checked on every migrate
+after_install = "ipay_integration.service_user.ensure"
+after_migrate = ["ipay_integration.service_user.ensure"]
 
 # Uninstallation
 # ------------
