@@ -145,6 +145,24 @@ class TestRecordingThroughTheRoute(FrappeTestCase):
 
 	# ---- iPay's side -----------------------------------------------------------------------------------------------------
 
+	def _ipay_reads_the_bill(self, bill_id):
+		"""iPay's signed GET /bills/{id}, through the real web stack. Returns the opened answer's bill."""
+		path = "/ipay/plugin/bills/" + bill_id
+		signed = envelope.sign_only(self.callback_keys, CLIENT, "GET", path)
+		response = make_request(target=self.client.get, args=(path,), kwargs={"headers": signed["headers"]})
+		body = response.get_data(as_text=True)
+		self.assertEqual(response.status_code, 200, body)
+		answer = envelope.open_(
+			{self.request_keys.kid: self.request_keys},
+			CLIENT,
+			envelope.RESPONSE,
+			path,
+			dict(response.headers.items()),
+			body,
+			expect_nonce=signed["nonce"],
+		)
+		return answer["bill"]
+
 	def _ipay_records(self, payload):
 		return self._ipay_posts(PATH, payload)
 
@@ -236,6 +254,10 @@ class TestRecordingThroughTheRoute(FrappeTestCase):
 			opened = ipay.open_panel(invoice.name)
 			reopened = ipay.open_panel(invoice.name)
 		self.assertEqual(opened["panel_url"], "https://ipay.example/erp-payments/in-erp/c#l=once")
+		# The person who pressed Pay with iPay: it only fills in the panel's email box.
+		launch.panel_launch.assert_called_with(
+			invoice.name, email=frappe.db.get_value("User", frappe.session.user, "email") or None
+		)
 		self.assertEqual(reopened, opened)
 		waiting = frappe.get_all(
 			ipay.PAYMENT_DOCTYPE,
@@ -317,4 +339,36 @@ class TestRecordingThroughTheRoute(FrappeTestCase):
 			)["outcome"],
 			"rejected",
 			"a payment for an invoice this site asked nothing for is refused",
+		)
+
+	def test_ipay_reads_the_suppliers_account_with_the_bill_when_it_is_usable(self):
+		self._company()
+		self._settings()
+		with_account = self._invoice(900)
+		without_account = self._invoice(400)
+
+		bank = f"iPay Test Bank {self.suffix}"
+		frappe.get_doc({"doctype": "Bank", "bank_name": bank, "ipay_nip_code": "058"}).insert()
+		frappe.get_doc(
+			{
+				"doctype": "Bank Account",
+				"account_name": f"Supplier account {self.suffix}",
+				"bank": bank,
+				"party_type": "Supplier",
+				"party": with_account.supplier,
+				"bank_account_no": "0123456789",
+				"is_default": 1,
+			}
+		).insert()
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit - the requests are served on another connection
+
+		bill = self._ipay_reads_the_bill(with_account.name)
+		self.assertEqual(bill["id"], with_account.name)
+		self.assertEqual(bill["status"], "open")
+		self.assertEqual(bill["supplier_bank"], {"bank_code": "058", "account_number": "0123456789"})
+
+		self.assertNotIn(
+			"supplier_bank",
+			self._ipay_reads_the_bill(without_account.name),
+			"no usable account: the person adds it in iPay's panel",
 		)

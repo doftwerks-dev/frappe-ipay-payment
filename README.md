@@ -45,6 +45,9 @@ Rotating keys: iPay issues new ones and keeps the old callback keys working for 
 ERPNext must be open). Then **Pay with iPay** opens iPay's own panel in a dialog on the invoice: the payer signs in there with an emailed
 token and the finance PIN, and nothing they type passes through ERPNext. The dialog must be on the same address iPay calls back
 (`https://your-site`), and only a page on iPay's own address is ever framed. The payment is reported and recorded by the same signed calls.
+The panel's email box is filled in with the payer's ERPNext email (they can change it). When the supplier has a usable bank account in
+ERPNext (a 10 digit number at a bank with an iPay NIP code), iPay reads it with the bill and the panel uses it; iPay still checks it with
+the bank and holds a new or changed account. Otherwise the payer adds the account in the panel.
 
 ### Security
 
