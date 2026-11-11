@@ -161,6 +161,8 @@ class TestRecordingThroughTheRoute(FrappeTestCase):
 			body,
 			expect_nonce=sealed["nonce"],
 		)
+		# The answer is bound to its own call's nonce (checked above); what is compared is the rest.
+		answer.pop("nonce", None)
 		return answer
 
 	# ---- the test --------------------------------------------------------------------------------------------------------
