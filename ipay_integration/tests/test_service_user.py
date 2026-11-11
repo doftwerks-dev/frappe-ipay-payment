@@ -35,7 +35,9 @@ class TestServiceUser(IntegrationTestCase):
 		service_user.ensure()
 		self.assertTrue(frappe.has_permission("Payment Entry", "create", user=SERVICE_USER))
 		self.assertTrue(frappe.has_permission("Purchase Invoice", "read", user=SERVICE_USER))
-		self.assertFalse(frappe.has_permission("User", "write", user=SERVICE_USER))
+		# Every desk user may edit its own User record; the service user may not edit anyone else's, nor the system's settings.
+		self.assertFalse(frappe.has_permission("User", "write", doc="Administrator", user=SERVICE_USER))
+		self.assertFalse(frappe.has_permission("System Settings", "write", user=SERVICE_USER))
 		self.assertFalse(frappe.has_permission("iPay Settings", "read", user=SERVICE_USER))
 
 	def test_a_role_added_by_hand_is_taken_away_on_migrate(self):
