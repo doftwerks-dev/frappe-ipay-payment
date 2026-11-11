@@ -12,6 +12,7 @@ returned by any method. The repository is public: nothing secret may ever be add
 """
 
 import re
+from urllib.parse import urlsplit
 
 import frappe
 from frappe.utils import cint, cstr, flt
@@ -25,6 +26,9 @@ IPAY_BANK_NAME = "iPay"
 MODE_OF_PAYMENT = "iPay"
 
 PAYER_ROLE = "iPay Payer"
+
+# The reference of a panel this site opened, until iPay reports the payment made in it (iPay's own start "panel-").
+PANEL_LAUNCH_PREFIX = "erpnext-panel:"
 
 # iPay's statuses, in the order a payment only ever moves forward, and what the Purchase Invoice shows for each.
 STATUS_RANK = {
@@ -345,7 +349,17 @@ def get_payment_context(name: str):
 			"status": open_request.status,
 			"amount": flt(open_request.amount),
 		}
+	context["pay_inside"] = bool(context["enabled"] and context["configured"] and _pays_inside(settings, row))
 	return context
+
+
+def _pays_inside(settings, row):
+	"""Whether the company pays its ERPNext bills from inside ERPNext, through iPay's panel. iPay decides; when it cannot be asked, the
+	answer is no and Pay with iPay works as before."""
+	try:
+		return bool(_client(settings, row).mode().get("pay_inside"))
+	except (IPayConfigError, IpayError):
+		return False
 
 
 def _configured(row):
@@ -359,11 +373,116 @@ def _open_payment(invoice):
 	rows = frappe.get_all(
 		PAYMENT_DOCTYPE,
 		filters={"purchase_invoice": invoice, "status": ["in", list(OPEN_STATUSES)]},
-		fields=["name", "status", "amount", "external_reference"],
+		fields=["name", "status", "amount", "external_reference", "ipay_payment_id"],
 		order_by="creation desc",
-		limit=1,
+		limit=5,
 	)
+	rows = [r for r in rows if not _waiting_panel_launch(r)]
 	return frappe._dict(rows[0]) if rows else None
+
+
+def _waiting_panel_launch(row):
+	"""A panel this site opened that iPay has not reported a payment for yet: someone may still pay in it, or may have closed it."""
+	return (
+		cstr(row.get("external_reference")).startswith(PANEL_LAUNCH_PREFIX)
+		and not row.get("ipay_payment_id")
+		and row.get("status") == "awaiting_confirm"
+	)
+
+
+@frappe.whitelist(methods=["POST"])
+def open_panel(name: str):
+	"""Opens iPay's panel for this invoice, for a company that pays its bills from inside ERPNext. Returns {"panel_url"}: show it in a
+	dialog at once. The launch in it works once, for 2 minutes; it is returned to the caller and never stored or logged.
+
+	The person signs in inside the panel (an emailed token and the finance PIN); nothing about that passes through this site."""
+	frappe.only_for(PAYER_ROLE)
+	doc = frappe.get_doc("Purchase Invoice", name)
+	doc.check_permission("write")
+	settings = frappe.get_single(SETTINGS_DOCTYPE)
+	row = _find_account(settings, doc.company)
+
+	errors = _preflight(doc, settings, row, supplier_bank=False)
+	if errors:
+		frappe.throw("<br>".join(errors), title=frappe._("iPay Payment"))
+
+	try:
+		client = _client(settings, row)
+		answer = client.panel_launch(doc.name)
+	except IPayConfigError as e:
+		frappe.throw(cstr(e))
+	except IpayError as e:
+		if e.code == "pay_inside_off":
+			frappe.throw(
+				frappe._(
+					"Your company now pays its bills in iPay, not from inside ERPNext. Reload the invoice and use Pay with iPay again."
+				)
+			)
+		if e.code in ("bill_not_payable", "bill_not_found"):
+			frappe.throw(frappe._("iPay says this bill is not open for payment or has nothing left to pay."))
+		frappe.throw(frappe._("iPay could not open its panel: {0}").format(cstr(e)))
+
+	panel_url = cstr(answer.get("panel_url"))
+	if not is_ipay_address(client.config.base_url, panel_url):
+		frappe.throw(frappe._("iPay answered with an address that is not iPay's own. Nothing was opened."))
+
+	_note_panel_launch(doc)
+	return {"panel_url": panel_url}
+
+
+def is_ipay_address(base_url, url):
+	"""True when `url` is on iPay's own origin (scheme, host and port of iPay Settings' address): the only page this site frames."""
+	try:
+		want, got = urlsplit(cstr(base_url)), urlsplit(cstr(url))
+		return bool(
+			got.scheme == want.scheme
+			and got.hostname
+			and got.hostname == want.hostname
+			and got.port == want.port
+			and not got.username
+			and not got.password
+		)
+	except ValueError:
+		return False
+
+
+def _note_panel_launch(doc):
+	"""Remembers that this site opened iPay's panel for the invoice, so the payment made in it is one this site asked for (see
+	plugin_api.adopt_panel_payment). One waiting launch per invoice is kept and reused; the invoice itself is not touched until iPay
+	reports a payment."""
+	amount = flt(doc.outstanding_amount, 2)
+	waiting = [
+		r
+		for r in frappe.get_all(
+			PAYMENT_DOCTYPE,
+			filters={"purchase_invoice": doc.name, "external_reference": ["like", PANEL_LAUNCH_PREFIX + "%"]},
+			fields=["name", "status", "external_reference", "ipay_payment_id"],
+			order_by="creation desc",
+		)
+		if _waiting_panel_launch(r)
+	]
+	if waiting:
+		frappe.db.set_value(PAYMENT_DOCTYPE, waiting[0].name, "amount", amount, update_modified=True)
+		return waiting[0].name
+	return (
+		frappe.get_doc(
+			{
+				"doctype": PAYMENT_DOCTYPE,
+				"purchase_invoice": doc.name,
+				"company": doc.company,
+				"supplier": doc.supplier,
+				"amount": amount,
+				"external_reference": _reference_part(
+					f"{PANEL_LAUNCH_PREFIX}{doc.name}:{frappe.generate_hash(length=10)}"
+				)[:140],
+				"status": "awaiting_confirm",
+				"route": "panel",
+				"requested_by": frappe.session.user,
+			}
+		)
+		.insert(ignore_permissions=True)
+		.name
+	)
 
 
 @frappe.whitelist(methods=["POST"])
@@ -439,7 +558,7 @@ def pay_invoice(name: str):
 	}
 
 
-def _preflight(doc, settings, row):
+def _preflight(doc, settings, row, supplier_bank=True):
 	"""Every reason the request cannot be made, at once."""
 	errors = []
 	if not cint(settings.enabled):
@@ -458,9 +577,13 @@ def _preflight(doc, settings, row):
 		errors.append(
 			frappe._("iPay Settings is incomplete for {0}: the keys are missing.").format(doc.company)
 		)
-	bank = _supplier_bank_details(doc.supplier)
-	if not bank or not cstr(bank.bank_account_no).strip() or not _bank_code(bank):
-		errors.append(frappe._("The supplier needs a bank account number and a bank with an iPay NIP code."))
+	# Asking iPay directly sends the supplier's account from here; in iPay's panel the payer gives it there.
+	if supplier_bank:
+		bank = _supplier_bank_details(doc.supplier)
+		if not bank or not cstr(bank.bank_account_no).strip() or not _bank_code(bank):
+			errors.append(
+				frappe._("The supplier needs a bank account number and a bank with an iPay NIP code.")
+			)
 	return errors
 
 
@@ -551,17 +674,18 @@ def apply_status(record, status, ipay_payment_id=None, error=None):
 
 
 def _sync_invoice(record):
-	"""The invoice shows the latest request's status."""
-	latest = frappe.get_all(
+	"""The invoice shows the latest request's status (a panel opened and not paid in is not a request yet)."""
+	rows = frappe.get_all(
 		PAYMENT_DOCTYPE,
 		filters={"purchase_invoice": record.purchase_invoice},
 		fields=["status", "ipay_payment_id", "external_reference", "error"],
 		order_by="creation desc",
-		limit=1,
+		limit=5,
 	)
-	if not latest:
+	rows = [r for r in rows if not _waiting_panel_launch(r)]
+	if not rows:
 		return
-	latest = latest[0]
+	latest = rows[0]
 	values = {
 		"ipay_status": INVOICE_STATUS.get(latest.status, ""),
 		"ipay_reference": cstr(latest.ipay_payment_id or latest.external_reference),

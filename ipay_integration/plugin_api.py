@@ -103,7 +103,7 @@ def build_receiver(row, config, callback_keys):
 			{"external_reference": cstr(payload.get("external_reference"))},
 			["name", "company", "last_event_id"],
 			as_dict=True,
-		)
+		) or adopt_panel_payment(company, payload)
 		if not found or found.company != company:
 			return  # not ours: acknowledged so iPay does not retry, nothing changed
 		if found.last_event_id == payload.get("event_id"):
@@ -124,6 +124,43 @@ def build_receiver(row, config, callback_keys):
 		base_path=PREFIX,
 		on_failure=frappe.db.rollback,
 	)
+
+
+def adopt_panel_payment(company, payload):
+	"""A payment started in iPay's panel inside ERPNext carries a reference iPay made ("panel-..."), not one of ours. It becomes ours only
+	when this site opened the panel for that invoice of this company (ipay.open_panel noted it): the waiting launch takes iPay's
+	reference, payment id and amount. Anything else is not a payment this site asked for, and is left alone.
+
+	Returns the adopted iPay Payment as {name, company, last_event_id}, or None."""
+	payment = payload.get("payment") or {}
+	reference = cstr(payload.get("external_reference"))
+	if not (payment.get("origin") or {}).get("in_erp") or not reference.startswith("panel-"):
+		return None
+	invoice = cstr(payment.get("bill_id"))
+	if not invoice or len(reference) > 140:
+		return None
+
+	# Locked while it is taken, so two events for two panel payments cannot both take the same launch.
+	name = frappe.db.get_value(
+		ipay.PAYMENT_DOCTYPE,
+		{
+			"purchase_invoice": invoice,
+			"company": company,
+			"external_reference": ["like", ipay.PANEL_LAUNCH_PREFIX + "%"],
+			"ipay_payment_id": ["is", "not set"],
+		},
+		"name",
+		order_by="creation desc",
+		for_update=True,
+	)
+	if not name:
+		return None
+	values = {"external_reference": reference, "ipay_payment_id": cstr(payment.get("id"))[:140]}
+	amount = flt(payment.get("amount"), 2)
+	if amount > 0:
+		values["amount"] = amount
+	frappe.db.set_value(ipay.PAYMENT_DOCTYPE, name, values, update_modified=True)
+	return frappe.db.get_value(ipay.PAYMENT_DOCTYPE, name, ["name", "company", "last_event_id"], as_dict=True)
 
 
 def claim_nonce(kid, nonce):

@@ -247,6 +247,28 @@ def test_the_client_asks_for_a_payment_and_returns_iPays_answer():
 	assert headers["Authorization"] == "Bearer tok-1" and headers["x-client-id"] == CLIENT
 
 
+def test_the_client_asks_the_mode_and_for_a_panel_launch():
+	fake = FakeIpay({"pay_inside": True})
+	assert IpayClient(config(), fake).mode() == {"pay_inside": True}
+	assert fake.calls[0][:2] == ("GET", "https://ipay.example/erp-plugin/v1/mode")
+
+	fake = FakeIpay(
+		{"panel_url": "https://ipay.example/erp-payments/in-erp/c#l=abc", "expires_in": 120}, status=201
+	)
+	out = IpayClient(config(), fake).panel_launch("ACC-PINV-2026-00001")
+	assert out == {"panel_url": "https://ipay.example/erp-payments/in-erp/c#l=abc", "expires_in": 120}
+	assert fake.calls[0][:2] == ("POST", "https://ipay.example/erp-plugin/v1/panel-launches")
+
+
+def test_a_refused_panel_launch_raises_with_iPays_code():
+	fake = FakeIpay(
+		{"error": {"code": "pay_inside_off", "message": "Use Pay with iPay as before."}}, status=409
+	)
+	with pytest.raises(IpayError) as e:
+		IpayClient(config(), fake).panel_launch("B-1")
+	assert (e.value.code, e.value.status) == ("pay_inside_off", 409)
+
+
 def test_a_401_gets_one_fresh_token_and_a_new_nonce():
 	fake = FakeIpay({"pong": True}, fail_first_with_401=True)
 	assert IpayClient(config(), fake).ping() == {"pong": True}

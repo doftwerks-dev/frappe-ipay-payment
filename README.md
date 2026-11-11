@@ -41,12 +41,19 @@ Rotating keys: iPay issues new ones and keeps the old callback keys working for 
    the approvers and the last approval pays.
 3. iPay tells ERPNext when the payment moves; the invoice shows its status and the Payment Entry is recorded against the **iPay** account.
 
+**Paying from inside ERPNext.** A company can choose, in iPay's ERP Bills settings, to pay its ERPNext bills from here (iPay's door for
+ERPNext must be open). Then **Pay with iPay** opens iPay's own panel in a dialog on the invoice: the payer signs in there with an emailed
+token and the finance PIN, and nothing they type passes through ERPNext. The dialog must be on the same address iPay calls back
+(`https://your-site`), and only a page on iPay's own address is ever framed. The payment is reported and recorded by the same signed calls.
+
 ### Security
 
 - Every call from iPay is checked before anything is read: client, key id, a five minute clock window, an HMAC-SHA256 signature, a nonce
   never seen before, and the AES-256-GCM encrypted body. A failure is a plain 401 with the reason only in the log. Answers are signed and
   encrypted too.
-- The confirmation link is a secret for 30 minutes: it goes straight to the payer's browser and is never stored or logged.
+- The confirmation link is a secret for 30 minutes: it goes straight to the payer's browser and is never stored or logged. So is the
+  panel's launch address (single use, 2 minutes).
+- A payment made in iPay's panel is recorded only for an invoice this site opened the panel for.
 - ERPNext keeps only the last four digits of the supplier account on its own request record.
 
 ### Upgrading from version 1
