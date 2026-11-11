@@ -207,6 +207,7 @@ class FakeIpay:
 
 	def __init__(self, answer=None, status=200, fail_first_with_401=False):
 		self.answer, self.status, self.calls, self.tokens = answer or {"ok": True}, status, [], 0
+		self.bodies = []
 		self.fail_first = fail_first_with_401
 
 	def post(self, url, auth=None, data=None, headers=None, timeout=None):
@@ -216,6 +217,7 @@ class FakeIpay:
 
 	def request(self, method, url, headers=None, data=None, timeout=None):
 		self.calls.append((method, url, headers))
+		self.bodies.append(data)
 		if self.fail_first and len(self.calls) == 1:
 			return Resp(401, "{}", {})
 		target = url.split("://", 1)[1].split("/", 1)[1]
@@ -258,6 +260,23 @@ def test_the_client_asks_the_mode_and_for_a_panel_launch():
 	out = IpayClient(config(), fake).panel_launch("ACC-PINV-2026-00001")
 	assert out == {"panel_url": "https://ipay.example/erp-payments/in-erp/c#l=abc", "expires_in": 120}
 	assert fake.calls[0][:2] == ("POST", "https://ipay.example/erp-plugin/v1/panel-launches")
+
+
+def test_a_panel_launch_sends_the_email_only_when_there_is_one():
+	target = "/erp-plugin/v1/panel-launches"
+	sent = []
+	for email in ("ada@acme.test", None):
+		fake = FakeIpay(
+			{"panel_url": "https://ipay.example/erp-payments/in-erp/c#l=abc", "expires_in": 120}, status=201
+		)
+		IpayClient(config(), fake).panel_launch("ACC-PINV-2026-00001", email=email)
+		sent.append(
+			envelope.open_({REQUEST.kid: REQUEST}, CLIENT, "POST", target, fake.calls[0][2], fake.bodies[0])
+		)
+	assert sent == [
+		{"bill_id": "ACC-PINV-2026-00001", "email": "ada@acme.test"},
+		{"bill_id": "ACC-PINV-2026-00001"},
+	]
 
 
 def test_a_refused_panel_launch_raises_with_iPays_code():

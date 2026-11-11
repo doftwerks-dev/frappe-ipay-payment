@@ -111,3 +111,22 @@ class TestFrontDoor(FrappeTestCase):
 			"",
 		):
 			self.assertFalse(ipay.is_ipay_address(base, url), url)
+
+	def test_the_supplier_account_iPay_reads_with_a_bill_must_be_usable(self):
+		cases = (
+			(
+				frappe._dict(bank="GTBank", bank_account_no=" 0123456789 ", branch_code=""),
+				"058",
+				{"bank_code": "058", "account_number": "0123456789"},
+			),
+			(frappe._dict(bank="GTBank", bank_account_no="012345678", branch_code=""), "058", None),
+			(frappe._dict(bank="GTBank", bank_account_no="01234567890", branch_code=""), "058", None),
+			(frappe._dict(bank="GTBank", bank_account_no="0123456789", branch_code=""), "", None),
+			(None, "058", None),
+		)
+		for bank, code, expected in cases:
+			with (
+				patch.object(ipay, "_supplier_bank_details", return_value=bank),
+				patch.object(ipay, "_bank_code", return_value=code),
+			):
+				self.assertEqual(ipay.supplier_bank_for_ipay("SUP-1"), expected, (bank, code))

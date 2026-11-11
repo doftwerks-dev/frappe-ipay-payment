@@ -92,10 +92,15 @@ class IpayClient:
         """{"pay_inside": bool}: whether the company pays this system's bills from inside it, through iPay's panel."""
         return self._get("/mode")
 
-    def panel_launch(self, bill_id: str) -> dict:
+    def panel_launch(self, bill_id: str, email: str | None = None) -> dict:
         """A one-time launch of iPay's panel for one bill: {"panel_url", "expires_in"}. The URL is a secret until it is used (its
-        fragment works once, for 2 minutes): show it in the payer's browser at once, never store or log it."""
-        return self._post("/panel-launches", {"bill_id": bill_id})
+        fragment works once, for 2 minutes): show it in the payer's browser at once, never store or log it.
+
+        `email`, optional: the signed-in person's email, which only fills in the panel's email box (they can change it)."""
+        body = {"bill_id": bill_id}
+        if email:
+            body["email"] = email
+        return self._post("/panel-launches", body)
 
     # ---- plumbing -------------------------------------------------------------------------------------------------
 
