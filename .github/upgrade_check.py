@@ -47,6 +47,12 @@ def after():
 	check(bool(frappe.db.exists("Role", "iPay Payer")), "the iPay Payer role exists")
 	for doctype in ("iPay Payment", "iPay Recording", "iPay Call Nonce"):
 		check(bool(frappe.db.exists("DocType", doctype)), f"the {doctype} doctype exists")
+	service = "ipay.callbacks@ipay-integration.invalid"
+	check(bool(frappe.db.get_value("User", service, "enabled")), "iPay's service user exists")
+	check(
+		set(frappe.get_all("Has Role", filters={"parent": service, "parenttype": "User"}, pluck="role")) == {"Accounts User"},
+		"iPay's service user has Accounts User and nothing else",
+	)
 	for patch in ("ipay_integration.patches.create_ipay_payer_role", "ipay_integration.patches.v2_front_door"):
 		check(bool(frappe.db.exists("Patch Log", {"patch": patch})), f"{patch} ran")
 	if failures:
