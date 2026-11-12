@@ -94,6 +94,8 @@ function ipay_show_panel(frm, panel_url) {
 		static: true,
 		fields: [{ fieldtype: "HTML", fieldname: "panel" }],
 	});
+	// static also hides the close button, and the panel has no button of its own: closing must stay a deliberate click
+	d.get_close_btn().show();
 
 	// The address carries a one-time launch (it works once, for 2 minutes): it goes into the frame and nowhere else, never into the
 	// page's HTML, storage or a log. The payer signs in inside iPay's panel; nothing they type passes through ERPNext.
