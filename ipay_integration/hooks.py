@@ -20,7 +20,11 @@ fixtures = [
 			["fieldname", "like", "ipay_%"],
 		],
 	},
+	{"dt": "Role", "filters": [["role_name", "=", "iPay Payer"]]},
 ]
+
+# iPay's signed calls arrive at /ipay/plugin/... (read a bill, record a payment, payment events)
+page_renderer = ["ipay_integration.plugin_api.IpayPluginRenderer"]
 
 # Apps
 # ------------------
@@ -100,7 +104,9 @@ doctype_list_js = {"Purchase Invoice": "public/js/purchase_invoice_list.js"}
 # ------------
 
 # before_install = "ipay_integration.install.before_install"
-# after_install = "ipay_integration.install.after_install"
+# iPay's callbacks run as a service user (service_user.py): created on install, its roles checked on every migrate
+after_install = "ipay_integration.service_user.ensure"
+after_migrate = ["ipay_integration.service_user.ensure"]
 
 # Uninstallation
 # ------------
@@ -166,13 +172,10 @@ doctype_list_js = {"Purchase Invoice": "public/js/purchase_invoice_list.js"}
 # ---------------
 
 scheduler_events = {
-	"cron": {
-		# safety net for transfers stuck in Initiated/Processing: the enqueued
-		# poll normally settles them, this catches missed jobs/worker restarts
-		"*/10 * * * *": [
-			"ipay_integration.ipay.poll_pending_transfers",
-		],
-	},
+	"hourly": [
+		# one-time nonces older than the clock window can never be replayed
+		"ipay_integration.plugin_api.prune_nonces",
+	],
 }
 
 # Testing
@@ -257,4 +260,3 @@ before_tests = "ipay_integration.tests.utils.before_tests"
 # ------------
 # List of apps whose translatable strings should be excluded from this app's translations.
 # ignore_translatable_strings_from = []
-

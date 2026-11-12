@@ -9,7 +9,70 @@
 > - `main` - stable v15 releases, merged from `develop`
 > - `version-16` - Frappe/ERPNext v16 releases
 
-Pay vendor bills and collect payments through iPay, from inside ERPNext
+Pay vendor bills with iPay from inside ERPNext. This app is a **front door** to iPay.
+
+| Who | Does |
+|---|---|
+| **ERPNext (this app)** | **Pay with iPay** on a Purchase Invoice asks iPay to pay it and opens iPay's confirmation page. It answers iPay's signed calls: read the invoice, record the payment, payment events. |
+| **iPay** | Checks the supplier account with the bank, re-reads the invoice, applies the company's approval flow, asks the payer for their iPay password, the company finance PIN and an emailed code, moves the money and is the record of the payment. |
+
+The app holds no iPay password or PIN, calls no transfer API and writes no Payment Entry on its own authority. A Payment Entry is created
+only when iPay tells ERPNext to, in a signed and encrypted call, once per payment, and only if the invoice can still take it.
+
+> **This repository is public. Never commit a client id, secret, key, token or site configuration.** Everything secret is entered in
+> iPay Settings on the site, where Frappe encrypts it.
+
+### Setup
+
+1. Install the app. Give the people who may pay the role **iPay Payer** (an Accounts Manager role alone is not enough).
+2. iPay registers an API client for each Company as an **ERP plugin** and gives you a client id, a client secret and five keys, shown once
+   (see iPay's `docs/erp-plugin-api.md`, `erp-plugin:client`).
+3. **iPay Settings**: add a row per Company and paste them in. Save, then **Test Connection**.
+4. Give iPay this site's callback address, `https://your-site/ipay/plugin`, and the server's outgoing IP address. The site must be reachable
+   by iPay over **https**.
+
+Rotating keys: iPay issues new ones and keeps the old callback keys working for a window; put the old callback keys in the row's
+"During a key rotation" section until it ends, then clear them.
+
+### Paying a bill
+
+1. On a submitted Purchase Invoice, **Pay with iPay**: confirm the supplier's bank and NUBAN account number.
+2. A tab opens on iPay. Enter your iPay password, the finance PIN and the emailed code. With an approval flow in iPay, the request goes to
+   the approvers and the last approval pays.
+3. iPay tells ERPNext when the payment moves; the invoice shows its status and the Payment Entry is recorded against the **iPay** account.
+
+**Paying from inside ERPNext.** A company can choose, in iPay's ERP Bills settings, to pay its ERPNext bills from here (iPay's door for
+ERPNext must be open). Then **Pay with iPay** opens iPay's own panel in a dialog on the invoice: the payer signs in there with an emailed
+token and the finance PIN, and nothing they type passes through ERPNext. The dialog must be on the same address iPay calls back
+(`https://your-site`), and only a page on iPay's own address is ever framed. The payment is reported and recorded by the same signed calls.
+The panel's email box is filled in with the payer's ERPNext email (they can change it). When the supplier has a usable bank account in
+ERPNext (a 10 digit number at a bank with an iPay NIP code), iPay reads it with the bill and the panel uses it; iPay still checks it with
+the bank and holds a new or changed account. Otherwise the payer adds the account in the panel.
+
+### Security
+
+- Every call from iPay is checked before anything is read: client, key id, a five minute clock window, an HMAC-SHA256 signature, a nonce
+  never seen before, and the AES-256-GCM encrypted body. A failure is a plain 401 with the reason only in the log. Answers are signed and
+  encrypted too.
+- The confirmation link is a secret for 30 minutes: it goes straight to the payer's browser and is never stored or logged. So is the
+  panel's launch address (single use, 2 minutes).
+- A payment made in iPay's panel is recorded only for an invoice this site opened the panel for.
+- iPay's calls are checked as a visitor. Only a verified call runs, and it runs as the service user
+  `ipay.callbacks@ipay-integration.invalid`, never as Administrator. That user has ERPNext's Accounts User role and nothing else, no
+  password, and may sign in only from the server itself. Install creates it; every migrate takes away any role added to it by hand.
+  Disabling it stops iPay's callbacks (iPay retries them) until it is enabled again.
+- ERPNext keeps only the last four digits of the supplier account on its own request record.
+
+### Upgrading from version 1
+
+The upgrade switches iPay off until each company is registered as a plugin and its keys are entered, and flags invoices that version 1 left
+in flight (check them in iPay before paying again). **Rotate the old API client secret in iPay**: old backups still hold it. Version 1's
+history stays under **iPay Transaction**, read only.
+
+### Tests
+
+`kit_tests/` checks the signing and encryption against messages produced by iPay's own PHP implementation:
+`pip install cryptography requests pytest && pytest kit_tests`. The Frappe tests run with `bench --site test_site run-tests --app ipay_integration`.
 
 ### Installation
 

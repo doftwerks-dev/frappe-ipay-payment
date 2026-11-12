@@ -1,0 +1,323 @@
+# Copyright (c) 2026, Doftwerks West Africa Limited and contributors
+# For license information, please see license.txt
+
+"""What iPay calls on this site (iPay docs/erp-plugin-api.md, "What the plugin must serve").
+
+	GET  /ipay/plugin/bills/<invoice>     read a Purchase Invoice
+	POST /ipay/plugin/payments            record a payment iPay has made
+	POST /ipay/plugin/payment-events      a payment moved
+
+Every call is verified by the plugin kit before anything is read: the client, the key id, a five minute clock window, the HMAC
+signature and a nonce never seen before; the body is AES-256-GCM encrypted. A failure is a plain 401 with the reason only in the log.
+Verification runs as the visitor. Only then does a handler run, for the one company the verified client belongs to, as iPay's
+service user (service_user.py: Accounts User, no password, never Administrator).
+"""
+
+import json
+
+import frappe
+from frappe.utils import cstr, flt, nowdate
+from frappe.website.page_renderers.base_renderer import BaseRenderer
+from werkzeug.wrappers import Response
+
+from ipay_integration import ipay, service_user
+from ipay_integration.ipay_plugin_kit import CallbackReceiver, NotFound
+
+PREFIX = "/ipay/plugin"
+
+
+class IpayPluginRenderer(BaseRenderer):
+	"""Serves iPay's callbacks. Registered in hooks.py (page_renderer) so the path can be /ipay/plugin/bills/<id>, which a whitelisted
+	method cannot be."""
+
+	def can_render(self):
+		return cstr(self.path).strip("/").startswith("ipay/plugin/")
+
+	def render(self):
+		request = frappe.local.request
+		settings = frappe.get_single(ipay.SETTINGS_DOCTYPE)
+		row = (
+			ipay.account_by_client_id(settings, request.headers.get("x-client-id", ""))
+			if settings.enabled
+			else None
+		)
+		if row is None:
+			return _response(
+				(401, {"Content-Type": "application/json"}, json.dumps({"error": "unauthenticated"}))
+			)
+
+		try:
+			config, callback_keys = ipay.callback_keys_for(settings, row)
+		except ipay.IPayConfigError:
+			frappe.log_error(title="iPay callback: settings incomplete", message=f"company {row.company}")
+			return _response(
+				(401, {"Content-Type": "application/json"}, json.dumps({"error": "unauthenticated"}))
+			)
+
+		receiver = build_receiver(row, config, callback_keys)
+		# What iPay signed is the request target exactly as it was sent, so the raw URI is used where the server gives it.
+		raw = request.environ.get("RAW_URI") or request.environ.get("REQUEST_URI")
+		target = raw if raw and raw.startswith("/") else request.full_path
+		target = target[:-1] if target.endswith("?") else target
+		body = request.get_data(as_text=True)
+		return _response(receiver.handle(request.method, target, dict(request.headers), body))
+
+
+def as_service_user(handler):
+	"""Runs a handler as iPay's service user. The receiver calls handlers only after the call is verified, so verification itself runs as
+	the visitor; the user before is put back whatever the handler does."""
+
+	def run(*args):
+		user = service_user.ready()
+		if not user:
+			# Logged to the file, not the database: the receiver rolls the database back when a handler fails. iPay retries the call.
+			frappe.logger("ipay_integration").error(
+				"iPay callback refused: the service user %s is missing or disabled (run bench migrate, or enable it)",
+				service_user.SERVICE_USER,
+			)
+			raise RuntimeError("iPay's service user is missing or disabled")
+		previous = frappe.session.user
+		# Reviewed: only after verification, and as a user with Accounts User alone (service_user.py), never Administrator.
+		frappe.set_user(user)  # nosemgrep: frappe-setuser
+		try:
+			return handler(*args)
+		finally:
+			frappe.set_user(previous)  # nosemgrep: frappe-setuser
+
+	return run
+
+
+def _response(reply):
+	status, headers, body = reply
+	return Response(body, status=status, headers=list(headers.items()))
+
+
+def build_receiver(row, config, callback_keys):
+	company = row.company
+
+	def bill(bill_id):
+		invoice = _invoice(company, bill_id)
+		if invoice is None:
+			raise NotFound()
+		answer = {
+			"id": invoice.name,
+			"number": cstr(invoice.bill_no or invoice.name),
+			"supplier_id": cstr(invoice.supplier),
+			"supplier_name": cstr(invoice.supplier_name or invoice.supplier),
+			"currency": cstr(invoice.currency),
+			"total": f"{flt(invoice.grand_total, 2):.2f}",
+			"amount_due": f"{flt(invoice.outstanding_amount, 2):.2f}",
+			"status": bill_status(invoice),
+			"raw_status": cstr(invoice.status),
+			"due_date": cstr(invoice.due_date or "") or None,
+		}
+		# The supplier's account, when it is usable: in iPay's panel inside ERPNext it takes precedence over typing one.
+		supplier_bank = ipay.supplier_bank_for_ipay(invoice.supplier)
+		if supplier_bank:
+			answer["supplier_bank"] = supplier_bank
+		return answer
+
+	def record_payment(payload):
+		return record(row, payload)
+
+	def payment_event(payload):
+		payment = payload.get("payment") or {}
+		found = frappe.db.get_value(
+			ipay.PAYMENT_DOCTYPE,
+			{"external_reference": cstr(payload.get("external_reference"))},
+			["name", "company", "last_event_id"],
+			as_dict=True,
+		) or adopt_panel_payment(company, payload)
+		if not found or found.company != company:
+			return  # not ours: acknowledged so iPay does not retry, nothing changed
+		if found.last_event_id == payload.get("event_id"):
+			return
+		doc = frappe.get_doc(ipay.PAYMENT_DOCTYPE, found.name)
+		status = cstr(payment.get("status") or cstr(payload.get("event")).split(".", 1)[-1])
+		ipay.apply_status(doc, status, cstr(payment.get("id")) or None, payment.get("failure_reason"))
+		doc.db_set("last_event_id", cstr(payload.get("event_id"))[:140], update_modified=False)
+
+	return CallbackReceiver(
+		row.client_id,
+		config.request_keys,
+		callback_keys,
+		claim_nonce,
+		bill=as_service_user(bill),
+		record_payment=as_service_user(record_payment),
+		payment_event=as_service_user(payment_event),
+		base_path=PREFIX,
+		on_failure=frappe.db.rollback,
+	)
+
+
+def adopt_panel_payment(company, payload):
+	"""A payment started in iPay's panel inside ERPNext carries a reference iPay made ("panel-..."), not one of ours. It becomes ours only
+	when this site opened the panel for that invoice of this company (ipay.open_panel noted it): the waiting launch takes iPay's
+	reference, payment id and amount. Anything else is not a payment this site asked for, and is left alone.
+
+	Returns the adopted iPay Payment as {name, company, last_event_id}, or None."""
+	payment = payload.get("payment") or {}
+	reference = cstr(payload.get("external_reference"))
+	if not (payment.get("origin") or {}).get("in_erp") or not reference.startswith("panel-"):
+		return None
+	invoice = cstr(payment.get("bill_id"))
+	if not invoice or len(reference) > 140:
+		return None
+
+	# Locked while it is taken, so two events for two panel payments cannot both take the same launch.
+	name = frappe.db.get_value(
+		ipay.PAYMENT_DOCTYPE,
+		{
+			"purchase_invoice": invoice,
+			"company": company,
+			"external_reference": ["like", ipay.PANEL_LAUNCH_PREFIX + "%"],
+			"ipay_payment_id": ["is", "not set"],
+		},
+		"name",
+		order_by="creation desc",
+		for_update=True,
+	)
+	if not name:
+		return None
+	values = {"external_reference": reference, "ipay_payment_id": cstr(payment.get("id"))[:140]}
+	amount = flt(payment.get("amount"), 2)
+	if amount > 0:
+		values["amount"] = amount
+	frappe.db.set_value(ipay.PAYMENT_DOCTYPE, name, values, update_modified=True)
+	return frappe.db.get_value(ipay.PAYMENT_DOCTYPE, name, ["name", "company", "last_event_id"], as_dict=True)
+
+
+def claim_nonce(kid, nonce):
+	"""True the first time a nonce is seen, False after. The document name is the key, so the database makes it atomic."""
+	try:
+		frappe.get_doc({"doctype": "iPay Call Nonce", "nonce_key": f"{kid}:{nonce}"}).insert(
+			ignore_permissions=True
+		)
+	except frappe.DuplicateEntryError:
+		return False
+	frappe.db.commit()  # nosemgrep: frappe-manual-commit - the claim must outlast a failing handler
+	return True
+
+
+def prune_nonces():
+	"""Nonces older than the clock window (plus margin) can never be replayed: the timestamp check refuses them first."""
+	cutoff = frappe.utils.add_to_date(frappe.utils.now_datetime(), hours=-1)
+	frappe.db.delete("iPay Call Nonce", {"creation": ["<", cutoff]})
+
+
+# ---------------------------------------------------------------------------
+# Reading and recording
+# ---------------------------------------------------------------------------
+
+
+def _invoice(company, bill_id):
+	name = cstr(bill_id)
+	if not name or not frappe.db.exists("Purchase Invoice", name):
+		return None
+	invoice = frappe.get_doc("Purchase Invoice", name)
+	if invoice.company != company or invoice.docstatus != 1 or invoice.is_return:
+		return None
+	return invoice
+
+
+def bill_status(invoice):
+	"""One of iPay's bill statuses (draft, open, partially_paid, paid, void): "open" is the only one iPay pays. A submitted invoice
+	with nothing outstanding is "paid"; one that cannot be paid for another reason (a debit note issued) is "draft"."""
+	if _payable(invoice):
+		return "open"
+	return "paid" if flt(invoice.outstanding_amount) <= 0 else "draft"
+
+
+def _payable(invoice):
+	return (
+		invoice.docstatus == 1
+		and flt(invoice.outstanding_amount) > 0
+		and cstr(invoice.status) not in ("Paid", "Cancelled", "Debit Note Issued")
+	)
+
+
+def record(row, payload):
+	"""Records a payment iPay made, once per `reference`. Returns {"outcome": "recorded"|"rejected"|"unknown", "erp_payment_id": str|None}.
+
+	Only for an invoice of this company that an open iPay Payment (one this site asked for) covers, and one call at a time per invoice."""
+	reference = cstr(payload["reference"])
+	if len(reference) > 100:
+		return {
+			"outcome": "rejected",
+			"erp_payment_id": None,
+		}  # never truncated: two references must never merge
+
+	name = cstr(payload["bill_id"])
+	# One recording at a time per invoice: a second call waits here, then finds the first one's recording.
+	if not frappe.db.get_value("Purchase Invoice", name, "name", for_update=True):
+		return {"outcome": "rejected", "erp_payment_id": None}
+
+	existing = frappe.db.get_value(
+		"iPay Recording", {"reference": reference}, ["payment_entry", "company"], as_dict=True
+	)
+	if existing:
+		if existing.company != row.company:
+			return {"outcome": "rejected", "erp_payment_id": None}
+		return {"outcome": "recorded", "erp_payment_id": existing.payment_entry}
+
+	invoice = _invoice(row.company, name)
+	if invoice is None or not _payable(invoice):
+		return {"outcome": "rejected", "erp_payment_id": None}
+	amount = flt(payload["amount"], 2)
+	if (
+		amount <= 0
+		or cstr(payload.get("currency")) != cstr(invoice.currency)
+		or amount > flt(invoice.outstanding_amount, 2) + 0.005
+	):
+		return {"outcome": "rejected", "erp_payment_id": None}
+
+	request = frappe.db.get_value(
+		ipay.PAYMENT_DOCTYPE,
+		{
+			"purchase_invoice": invoice.name,
+			"company": row.company,
+			"status": ["in", list(ipay.OPEN_STATUSES)],
+			"amount": [">=", amount - 0.005],
+		},
+		"name",
+	)
+	if not request:
+		return {"outcome": "rejected", "erp_payment_id": None}  # not a payment this site asked for
+
+	try:
+		entry = _create_payment_entry(
+			row, invoice, min(amount, flt(invoice.outstanding_amount, 2)), reference
+		)
+	except frappe.ValidationError:
+		# An invoice on hold, a frozen account date, a missing account: a refusal iPay can show, not a 5xx it retries forever.
+		frappe.db.rollback()
+		return {"outcome": "rejected", "erp_payment_id": None}
+
+	frappe.get_doc(
+		{
+			"doctype": "iPay Recording",
+			"reference": reference,
+			"company": row.company,
+			"purchase_invoice": invoice.name,
+			"payment_entry": entry,
+			"amount": amount,
+		}
+	).insert(ignore_permissions=True)
+	ipay.apply_status(frappe.get_doc(ipay.PAYMENT_DOCTYPE, request), "recorded")
+	return {"outcome": "recorded", "erp_payment_id": entry}
+
+
+def _create_payment_entry(row, invoice, amount, reference):
+	from erpnext.accounts.doctype.payment_entry.payment_entry import get_payment_entry
+
+	pe = get_payment_entry(
+		"Purchase Invoice", invoice.name, party_amount=amount, bank_account=row.payment_account
+	)
+	pe.mode_of_payment = ipay.MODE_OF_PAYMENT
+	pe.paid_from = row.payment_account
+	pe.reference_no = reference
+	pe.reference_date = nowdate()
+	pe.flags.ignore_permissions = True
+	pe.insert(ignore_permissions=True)
+	pe.submit()
+	return pe.name
